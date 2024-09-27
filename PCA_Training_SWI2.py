@@ -162,7 +162,7 @@ impath = os.path.join(root_dir,'training_data') #load weights
 
 #unfreeze final layer and Channel input block for finetuning
 model.netSeg_A.CNN_block1.requires_grad_(True)
-model.netSeg_A.out_conv.requires_grad_(True)
+#model.netSeg_A.out_conv.requires_grad_(True)
 # model.netSeg_A.out_conv.requires_grad_(True)
 
 #we can unfreeze other layers either right away or on a epoch based schedule
@@ -323,8 +323,8 @@ epoch_loss_values = []
 num_epochs = 10000
 best_dice=0
 for epoch in range(num_epochs):
-    # if epoch==50:
-    #     model.netSeg_A.out_conv.requires_grad_(True)
+    if epoch==100:
+        model.netSeg_A.out_conv.requires_grad_(True)
     if epoch==500:    
         model.netSeg_A.CNN_block2.requires_grad_(True)
         model.netSeg_A.RU11.requires_grad_(True)
@@ -431,11 +431,43 @@ for epoch in range(num_epochs):
             dice_2D=np.average(dice_2D)
             print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
             if dice_2D>best_dice:
-                    print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice)   
-                    sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % step)
-                    sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % step)
-                    sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % step)
-                    sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % step)
+                    print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
+                    im_iter=0
+                    for vol_data in val_loader:
+                        im_iter += 1
+                        adc, label_val,t2w = vol_data["img"].to(device), vol_data["seg"].to(device), vol_data["t2w"].to(device)
+                        
+                        label_val_vol=label_val
+                        #if torch.sum(label_val)>0:
+                        adc=scale_ADC(adc)
+                        
+                        val_inputs=torch.cat((adc,t2w),dim=1)
+                       
+                        
+                        with autocast(enabled=True):
+                            #pass model segmentor and region info
+                            #input, roi size, sw batch size, model, overlap (0.5)
+                            vol_data["pred"] = sliding_window_inference(val_inputs,
+                                                                        (128, 128, 5),
+                                                                        1,
+                                                                        model.netSeg_A,
+                                                                        overlap=0.50,
+                                                                        mode="gaussian",
+                                                                        sigma_scale=[0.128, 0.128,0.001])
+                    
+                        seg = from_engine(["pred"])(vol_data)
+                        #print("seg length: ", len(seg))
+                        seg = seg[0]
+                        #print("seg shape: ", np.shape(seg))
+                        seg = np.array(seg)
+                        seg=np.squeeze(seg)
+                        seg[seg >= 0.5]=1.0
+                        seg[seg < 0.5]=0.0
+                    
+                        sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % im_iter)
+                        sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % im_iter)
+                        sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % im_iter)
+                        sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % im_iter)
 
                     model.save('AVG_best_finetuned')
                     best_dice = dice_2D
