@@ -1,5 +1,7 @@
 name: smit_env
 channels:
+  - anaconda
+  - bioconda
   - pytorch
   - conda-forge
   - defaults
@@ -17,17 +19,18 @@ dependencies:
   - blas=1.0=mkl
   - blinker=1.5=pyhd8ed1ab_0
   - blosc=1.21.0=h4ff587b_1
+  - bottleneck=1.3.7=py39ha9d4c09_0
   - brotli=1.0.9=h166bdaf_8
   - brotli-bin=1.0.9=h166bdaf_8
   - brotlipy=0.7.0=py39h27cfd23_1003
   - brunsli=0.1=h9c3ff4c_0
   - bzip2=1.0.8=h7f98852_4
   - c-ares=1.18.1=h7f98852_0
-  - ca-certificates=2022.12.7=ha878542_0
+  - ca-certificates=2024.7.2=h06a4308_0
   - cached-property=1.5.2=hd8ed1ab_1
   - cached_property=1.5.2=pyha770c72_1
   - cachetools=5.2.0=pyhd8ed1ab_0
-  - certifi=2022.12.7=pyhd8ed1ab_0
+  - certifi=2024.8.30=py39h06a4308_0
   - cffi=1.15.1=py39h74dc2b5_0
   - cfitsio=3.470=hb418390_7
   - charls=2.2.0=h2531618_0
@@ -123,6 +126,7 @@ dependencies:
   - markupsafe=2.1.1=py39hb9d737c_1
   - matplotlib=3.6.1=py39hf3d152e_1
   - matplotlib-base=3.6.1=py39hf9fd14e_1
+  - medpy=0.4.0=py_0
   - mkl=2021.4.0=h06a4308_640
   - mkl-service=2.4.0=py39h7e14d7c_0
   - mkl_fft=1.3.1=py39h0c7bc48_1
@@ -134,15 +138,17 @@ dependencies:
   - nettle=3.6=he412f7d_0
   - networkx=2.8.8=pyhd8ed1ab_0
   - nibabel=4.0.2=pyhd8ed1ab_0
+  - numexpr=2.8.4=py39he184ba9_0
   - numpy=1.23.4=py39h14f4228_0
   - numpy-base=1.23.4=py39h31eccc5_0
   - oauthlib=3.2.2=pyhd8ed1ab_0
   - olefile=0.46=pyh9f0ad1d_1
   - openh264=2.1.1=h780b84a_0
   - openjpeg=2.4.0=hb52868f_1
-  - openssl=1.1.1s=h0b41bf4_1
+  - openssl=1.1.1w=h7f8727e_0
   - opt_einsum=3.3.0=pyhd8ed1ab_1
   - packaging=22.0=pyhd8ed1ab_0
+  - pandas=1.5.3=py39h417a72b_0
   - partd=1.3.0=pyhd8ed1ab_0
   - pcre=8.45=h9c3ff4c_0
   - pillow=9.2.0=py39hae2aec6_0
@@ -166,6 +172,7 @@ dependencies:
   - pytorch=1.12.1=py3.9_cuda11.6_cudnn8.3.2_0
   - pytorch-ignite=0.4.8=pyhd8ed1ab_0
   - pytorch-mutex=1.0=cuda
+  - pytz=2024.1=py39h06a4308_0
   - pyu2f=0.1.5=pyhd8ed1ab_0
   - pywavelets=1.3.0=py39h2ae25f5_2
   - pyyaml=6.0=py39hb9d737c_5
