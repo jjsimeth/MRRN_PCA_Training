@@ -24,8 +24,8 @@ assumes nifti files with units 1e-3 mm^2/s
 import torch as t
 from torch.cuda.amp import GradScaler, autocast
 import numpy as np
-from PIL import Image
-import torchvision.transforms as transforms
+# from PIL import Image
+# import torchvision.transforms as transforms
 
 #import matplotlib.pyplot as plt
 import os
@@ -35,11 +35,11 @@ import torch.multiprocessing
 import torch.utils.data
 from options.train_options import TrainingOptions
 from models.models import create_model
-from util import util
+# from util import util
 from PCA_DIL_inference_utils import sliding_window_inference 
 
 
-from pathlib import Path
+# from pathlib import Path
 from glob import glob
 
 from typing import Tuple
@@ -300,55 +300,7 @@ post_transforms = Compose([
 # 3D dataset with preprocessing transforms
 train_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
 val_ds = monai.data.CacheDataset(data=val_files, transform=val_transforms)
-# use batch_size=1 to check the volumes because the input volumes have different shapes
-# check_loader = DataLoader(volume_ds, batch_size=1)
-# check_data = monai.utils.misc.first(check_loader)
 
-# adc, label_val,t2w = check_data["img"].to(device), check_data["seg"].to(device), check_data["t2w"].to(device)
-# # t2w=t2w[0,0,:,:,2]
-# # adc=adc[0,0,:,:,2]
-# # label_val=label_val[0,0,:,:,2]
-
-# # transform = transforms.ToPILImage()
-# # t2w = transform(t2w)
-# # adc = transform(adc)
-# # label_png = transform(label_val)
-# # t2w.save('t2w_check.png')
-# # adc.save('adc_check.png')
-# # label_png.save('label_check.png')
-            
-# print("first volume's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
-
-
-# patch_func = Compose(
-#     [
-#      monai.data.PatchIterd(keys=["img","seg","t2w"], patch_size=(128, 128, opt.nslices)), #using 5 slices like I did, but you can change to 1 or 3 if desired
-#      #monai.data.PatchIterd(keys=[], patch_size=(1, None, None), start_pos=(0, 0, 0)) #using 1 target slice, but you could have it match image slices if desired (just need to use overlapping sliding window inference)
-#          ]
-# )
-# patch_transform = Compose(
-#     [
-#          # squeeze the last dim
-#         #Resized(keys=["img","t2w", "seg"], spatial_size=[-1, DIM_in[0], DIM_in[1]]),
-#         # to use crop/pad instead of resize:
-#         #ResizeWithPadOrCropd(keys=["img", "seg","t2w"], spatial_size=[DIM_in[0], DIM_in[1], None], mode="replicate"),
-#         RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
-#         Transposed(keys=["img", "seg","t2w"], indices =[3,2,1,0]),
-#         SqueezeDimd(keys=["img","t2w", "seg"],dim=-1), 
-#     ]
-# )
-# patch_ds = monai.data.GridPatchDataset(
-#     data=volume_ds, patch_iter=patch_func, transform=patch_transform, with_coordinates=False
-# )
-
-# patch_val = monai.data.GridPatchDataset(
-#     data=volume_validation, patch_iter=patch_func, transform=patch_transform, with_coordinates=False
-# )
-
-# shuffle_ds = monai.data.ShuffleBuffer(volume_ds, buffer_size=30, seed=0)
-
-#train_ds=monai.data.ShuffleBuffer(volume_ds, buffer_size=30, seed=0)
-# val_ds=monai.data.Dataset(data=volume_validation, transform=val_transforms)
 
 train_loader = DataLoader(
     train_ds,
@@ -368,7 +320,7 @@ check_data = monai.utils.misc.first(train_loader)
 print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
 
 epoch_loss_values = []
-num_epochs = 5000
+num_epochs = 10000
 best_dice=0
 for epoch in range(num_epochs):
     # if epoch==50:
@@ -426,17 +378,7 @@ for epoch in range(num_epochs):
                                                                 overlap=0.50,
                                                                 mode="gaussian",
                                                                 sigma_scale=[0.128, 0.128,0.001])
-                
-                
-      
-                
-                # model.set_test_input(inputs)
-                # ori_img, seg = model.net_Segtest_image()
-                # val_data = [post_transforms(i) for i in decollate_batch(val_data)]
-                
-                
-                
-                
+            
                 seg = from_engine(["pred"])(val_data)
                 #print("seg length: ", len(seg))
                 seg = seg[0]
@@ -449,10 +391,7 @@ for epoch in range(num_epochs):
                 
                 
                 
-                sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % step)
-                sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % step)
-                sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % step)
-                sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % step)
+               
                 # print(np.ndim(seg))
                 # print(seg)
                 # print(np.shape(seg))
@@ -492,6 +431,11 @@ for epoch in range(num_epochs):
             dice_2D=np.average(dice_2D)
             print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
             if dice_2D>best_dice:
-                    print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice)         
+                    print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice)   
+                    sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % step)
+                    sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % step)
+                    sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % step)
+                    sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % step)
+
                     model.save('AVG_best_finetuned')
                     best_dice = dice_2D
