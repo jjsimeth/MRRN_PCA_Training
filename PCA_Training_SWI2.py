@@ -76,6 +76,14 @@ from monai.transforms import (
 opt = TrainingOptions().parse()
 opt.isTrain=True
 
+def copy_info(src, dst):
+
+    dst.SetSpacing(src.GetSpacing())
+    dst.SetOrigin(src.GetOrigin())
+    dst.SetDirection(src.GetDirection())
+
+    return dst
+
 def partial_mixup(input: torch.Tensor,
                   gamma: float,
                   indices: torch.Tensor
@@ -162,7 +170,7 @@ impath = os.path.join(root_dir,'training_data') #load weights
 
 #unfreeze final layer and Channel input block for finetuning
 model.netSeg_A.CNN_block1.requires_grad_(True)
-#model.netSeg_A.out_conv.requires_grad_(True)
+model.netSeg_A.out_conv.requires_grad_(True)
 # model.netSeg_A.out_conv.requires_grad_(True)
 
 #we can unfreeze other layers either right away or on a epoch based schedule
@@ -282,16 +290,16 @@ val_transforms = Compose(
 
 post_transforms = Compose([
         EnsureTyped(keys="pred"),
-        # Invertd(
-        #     keys="pred",
-        #     transform=val_transforms,
-        #     orig_keys="t2w",
-        #     meta_keys="pred_meta_dict",
-        #     orig_meta_keys="image_meta_dict",
-        #     meta_key_postfix="meta_dict",
-        #     nearest_interp=True,
-        #     to_tensor=True,
-        # ),
+        Invertd(
+            keys="pred",
+            transform=val_transforms,
+            orig_keys="t2w",
+            meta_keys="pred_meta_dict",
+            orig_meta_keys="image_meta_dict",
+            meta_key_postfix="meta_dict",
+            nearest_interp=True,
+            to_tensor=True,
+        ),
         AsDiscreted(keys="pred", argmax=False),
 
     ])
@@ -299,6 +307,7 @@ post_transforms = Compose([
 
 # 3D dataset with preprocessing transforms
 train_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
+
 val_ds = monai.data.CacheDataset(data=val_files, transform=val_transforms)
 
 
@@ -323,8 +332,8 @@ epoch_loss_values = []
 num_epochs = 10000
 best_dice=0
 for epoch in range(num_epochs):
-    if epoch==100:
-        model.netSeg_A.out_conv.requires_grad_(True)
+    # if epoch==100:
+    #     model.netSeg_A.out_conv.requires_grad_(True)
     if epoch==500:    
         model.netSeg_A.CNN_block2.requires_grad_(True)
         model.netSeg_A.RU11.requires_grad_(True)
@@ -334,7 +343,13 @@ for epoch in range(num_epochs):
     epoch_loss, step = 0, 0
     for batch_data in train_loader:
         step += 1
+        
+        # img_name = batch_data['image_meta_dict']['filename_or_obj'][0].split('/')[-1]
+        # print(img_name)
+        
         adc, labels, t2w = batch_data["img"].to(device), batch_data["seg"].to(device), batch_data["t2w"].to(device)
+        # img_name=t2w.meta['filename_or_obj']
+        # print(img_name)
         
         if torch.sum(labels)>0:
             adc=scale_ADC(adc)
@@ -361,6 +376,7 @@ for epoch in range(num_epochs):
                 step += 1
                 adc, label_val,t2w = val_data["img"].to(device), val_data["seg"].to(device), val_data["t2w"].to(device)
                 
+        
                 label_val_vol=label_val
                 #if torch.sum(label_val)>0:
                 adc=scale_ADC(adc)
@@ -437,6 +453,9 @@ for epoch in range(num_epochs):
                         im_iter += 1
                         adc, label_val,t2w = vol_data["img"].to(device), vol_data["seg"].to(device), vol_data["t2w"].to(device)
                         
+                        img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+                        print(img_name)
+                        
                         label_val_vol=label_val
                         #if torch.sum(label_val)>0:
                         adc=scale_ADC(adc)
@@ -454,7 +473,9 @@ for epoch in range(num_epochs):
                                                                         overlap=0.50,
                                                                         mode="gaussian",
                                                                         sigma_scale=[0.128, 0.128,0.001])
-                    
+                        
+                        
+                        
                         seg = from_engine(["pred"])(vol_data)
                         #print("seg length: ", len(seg))
                         seg = seg[0]
@@ -468,6 +489,22 @@ for epoch in range(num_epochs):
                         sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % im_iter)
                         sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % im_iter)
                         sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % im_iter)
+                        
+                        vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
+                        seg_out= from_engine(["pred"])(vol_data)[0]
+                        seg_out = np.array(seg_out)
+                        seg_out=np.squeeze(seg_out)
+                        seg_out[seg_out >= 0.5]=1.0
+                        seg_out[seg_out < 0.5]=0.0
+                        seg_out = np.transpose(seg_out, (2, 1, 0))
+                        
+                        
+                        cur_rd_path=os.path.join(impath,img_name)
+                        im_obj = sitk.ReadImage(cur_rd_path)
+                        seg_out = sitk.GetImageFromArray(seg_out)
+                        seg_out = copy_info(im_obj, seg_out)
+                        sitk.WriteImage(seg_out, 'seg_%s' % img_name)
+
 
                     model.save('AVG_best_finetuned')
                     best_dice = dice_2D
