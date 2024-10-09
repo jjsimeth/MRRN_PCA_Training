@@ -361,7 +361,7 @@ def train_stuff():
 
 
 
-                # inputs, labels = mixup(inputs, labels, np.random.beta(1.0, 1.0))
+                inputs, labels = mixup(inputs, labels, np.random.beta(1.0, 1.0))
                 #inputs, labels = mixup(inputs, labels, np.random.beta(0.2, 0.2))
                 labels=  torch.clamp(labels,0.001,0.999) #label smoothing
 
