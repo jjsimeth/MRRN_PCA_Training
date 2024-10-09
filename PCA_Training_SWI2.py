@@ -505,8 +505,8 @@ def train_stuff():
                             im_obj = sitk.ReadImage(cur_rd_path)
                             seg_out = sitk.GetImageFromArray(seg_out)
                             seg_out = copy_info(im_obj, seg_out)
-                            # sitk.WriteImage(seg_out, 'seg_%s' % img_name)
-
+                            sitk.WriteImage(seg_out, os.path.join(os.path.dirname(img_name),
+                                                                  'seg_%s' % os.path.basename(img_name)))
 
                         model.save('AVG_best_finetuned')
                         best_dice = dice_2D
