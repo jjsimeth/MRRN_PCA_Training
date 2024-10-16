@@ -19,7 +19,7 @@ class TrainOptions(BaseOptions):
         self.parser.add_argument('--niter', type=int, default=100, help='# of iter at starting learning rate')
 
         self.parser.add_argument('--optimizer', type=str, default='AdamW', help='which epoch to load? set to latest to use latest cached model')
-        self.parser.add_argument('--loss', type=str, default='DML', help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
+        self.parser.add_argument('--loss', type=str, default='dice', help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
         self.parser.add_argument('--isTrain', type=int, default=True, help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
 
 
