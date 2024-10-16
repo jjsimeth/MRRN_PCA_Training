@@ -5,8 +5,6 @@ Created on Fri Oct 27 13:41:09 2023
 @author: SimethJ
 """
 
-
-
 # -*- coding: utf-8 -*-
 """
 Created on Wed Oct 25 11:45:59 2023
@@ -102,7 +100,7 @@ def mixup(input: torch.Tensor,
 
 
 
-def scale_ADC(image):
+def scale_ADC(image: MetaTensor):
     adc_max=image.data.amax()
     adc_max=adc_max.data.cpu().numpy()
     
@@ -137,6 +135,105 @@ def find_file_with_string(folder_path, target_string):
     # If no matching file is found, return None
     return None
 
+
+def visualize_metatensor_slices(adc: "MetaTensor", t2: "MetaTensor", label_data: "MetaTensor",
+                                prediction_data: np.ndarray, save_folder: Optional[pathlib.Path] = None,
+                                dice_score:Optional[float] = None) -> Optional[
+    pathlib.Path]:
+    """
+    Visualize all slices from ADC and T2 MetaTensor objects with label contours and prediction overlays in a single figure.
+
+    This function takes ADC, T2, label MetaTensors and a prediction NumPy array, and visualizes
+    all slices in one figure. The resulting plot shows ADC and T2 images in two columns,
+    with label contours and prediction contours overlaid on both images.
+
+    Args:
+        adc (MetaTensor): A 5D MetaTensor object containing the ADC image data.
+        t2 (MetaTensor): A 5D MetaTensor object containing the T2 image data.
+        label_data (MetaTensor): A 5D MetaTensor object containing the label contour data.
+        prediction_data (np.ndarray): A 3D NumPy array containing the prediction contour data.
+        save_folder (Path, optional): Path to the folder where the visualization should be saved.
+                                      If None, the plot is displayed but not saved.
+
+    Returns:
+        Optional[Path]: The path to the saved visualization if save_folder is provided, else None.
+    """
+    # Ensure MetaTensor scan inputs are 5D tensors
+    if any(tensor.ndim != 5 for tensor in [adc, t2, label_data]):
+        raise ValueError("All scan MetaTensor inputs must have 5 dimensions")
+
+    # Select appropriate dimensions and move to CPU
+    adc = adc[0, 0, :, :, :].cpu().numpy()
+    t2 = t2[0, 0, :, :, :].cpu().numpy()
+    label_data = label_data[0, 0, :, :, :].cpu().numpy()
+
+    # Ensure prediction_data is a 3D NumPy array
+    if prediction_data.ndim != 3:
+        raise ValueError("prediction_data must be a 3D NumPy array")
+
+    num_slices = adc.shape[2]  # Assuming the last dimension is the number of slices
+
+    # Create figure with two columns
+    fig, axes = plt.subplots(num_slices, 2, figsize=(10, 5 * num_slices))
+    if dice_score:
+        fig.suptitle(f"ADC and T2 Slices with Ground Truth and Prediction Contours. Dice: {dice_score}", fontsize=16)
+    else:
+        fig.suptitle("ADC and T2 Slices with Ground Truth and Prediction Contours", fontsize=16)
+
+    for slice_index in range(num_slices):
+        # Process images for the current slice
+        adc_slice = adc[:, :, slice_index]
+        t2_slice = t2[:, :, slice_index]
+
+        # Indicate plotted position
+        ax_adc, ax_t2 = axes[slice_index, :]
+
+        # Process contour data
+        label_slice = label_data[:, :, slice_index]
+        prediction_slice = prediction_data[:, :, slice_index]
+
+        # Plot ADC slice
+        im_adc = ax_adc.imshow(adc_slice, cmap='gray')
+        ax_adc.contour(label_slice, colors='r', linewidths=0.5)
+        ax_adc.contour(prediction_slice, colors='b', linewidths=0.5)
+        ax_adc.axis('off')
+        ax_adc.set_title(f'ADC Slice {slice_index}')
+
+        # Plot T2 slice
+        im_t2 = ax_t2.imshow(t2_slice, cmap='gray')
+        ax_t2.contour(label_slice, colors='r', linewidths=0.5)
+        ax_t2.contour(prediction_slice, colors='b', linewidths=0.5)
+        ax_t2.axis('off')
+        ax_t2.set_title(f'T2 Slice {slice_index}')
+
+    # Create legend
+    legend_elements = [
+        Patch(facecolor='red', edgecolor='red', label='Ground Truth'),
+        Patch(facecolor='blue', edgecolor='blue', label='Prediction')
+    ]
+
+    # Add legend to the figure
+    fig.legend(handles=legend_elements, loc='lower center', ncol=2, bbox_to_anchor=(0.5, 0.02))
+
+    # Adjust the layout
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.05, top=0.95)  # Make room for the legend and title
+
+    # Save the visualization if save_folder is provided
+    if save_folder:
+        save_folder = pathlib.Path(save_folder)
+        save_folder.mkdir(parents=True, exist_ok=True)
+        current_time = datetime.datetime.now().strftime("%H_%M_%S_%f")
+        file_name = f'train_vis_all_slices_{current_time}.png'
+        image_path = save_folder / file_name
+        plt.savefig(image_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved visualization to: {image_path}")
+        return image_path
+    else:
+        plt.show()
+        return None
+
 def train_stuff():
 
     opt = TrainingOptions().parse()
@@ -164,11 +261,6 @@ def train_stuff():
     #freeze all layers
     for param in model.netSeg_A.parameters():
             param.requires_grad = False
-
-
-    #impath = os.path.join(path,'nii_vols') #load weights
-    impath = os.path.join(root_dir,'training_data') #load weights
-
 
     #unfreeze final layer and Channel input block for finetuning
     model.netSeg_A.CNN_block1.requires_grad_(True)
@@ -203,12 +295,19 @@ def train_stuff():
 
     #get nii and seg data
     #nmodalities=2
+    # impath = os.path.join(root_dir,'training_data') #load data
     # images = sorted(glob(os.path.join(root_dir, "adc*.nii.gz")))
-    images = sorted(glob(os.path.join(impath, "*_ep2d_diff_*.nii.gz"))) #adc keywords from filename
+    # images = sorted(glob(os.path.join(impath, "*_ep2d_diff_*.nii.gz"))) #ivim adc keywords from filename
     #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
-    segs = sorted(glob(os.path.join(impath, "*t2_tse_tra*_ROI.nii.gz")))
+    # segs = sorted(glob(os.path.join(impath, "*t2_tse_tra*_ROI.nii.gz")))
     # images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
-    images_t2w = sorted(glob(os.path.join(impath, "*_t2_tse*.nii.gz"))) #t2w keywords from filename
+    # images_t2w = sorted(glob(os.path.join(impath, "*_t2_tse*.nii.gz"))) #t2w keywords from filename
+
+    # NKI data
+    impath = os.path.join(root_dir,'training_data\\nki_resampled') #load data
+    images = sorted(glob(os.path.join(impath, "*adc*.nii")))
+    segs = sorted(glob(os.path.join(impath, "*LES*.nii")))
+    images_t2w = sorted(glob(os.path.join(impath, "*tt2*.nii"))) #t2w keywords from filename
 
     # print(images)
     # print(segs)
@@ -216,8 +315,11 @@ def train_stuff():
     #can add additional modalities with thier keyname
     #images_ktrans = sorted(glob(os.path.join(root_dir, "ktrans*.nii.gz")))
 
-    n_val=3
-    n_train=7
+    # total_dataset= 10
+    total_dataset= 156
+    n_val=round(total_dataset*0.3)
+    n_train=total_dataset-n_val
+
     train_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(images[:n_train], segs[:n_train], images_t2w[:n_train])] #first n_train to training
     val_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(images[-n_val:], segs[-n_val:], images_t2w[-n_val:])] #last  n_val to validation
 
@@ -333,6 +435,7 @@ def train_stuff():
     epoch_loss_values = []
     num_epochs = 10000
     best_dice=0
+    selected_slice = 2
     for epoch in range(num_epochs):
         # if epoch==100:
         #     model.netSeg_A.out_conv.requires_grad_(True)
@@ -357,7 +460,7 @@ def train_stuff():
                 adc=scale_ADC(adc)
 
                 inputs=torch.cat((adc,t2w),dim=1)
-                labels=labels[:,2,:,:]
+                labels=labels[:,selected_slice,:,:]
 
 
 
@@ -370,6 +473,7 @@ def train_stuff():
         if (epoch%50)==0:
             print("-" * 10)
             print(f"epoch {epoch + 1}/{num_epochs}. Current datetime: {datetime.datetime.now()}")
+            print("-" * 10)
             with torch.no_grad(): # no grade calculation
                 dice_2D=[]
                 smooth=1
@@ -439,7 +543,16 @@ def train_stuff():
 
                     intersection = np.sum(seg_flt * (gt_flt > 0))
                     dice_2D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
-                    print(dice_2D_temp)
+                    print(f"dice {dice_2D_temp} for data: {val_loader.dataset.data[step-1]}")
+                    if (epoch%50)==0:
+                        # visualize for inspection
+                        visualization_folder = pathlib.Path(
+                            r"D:\Projects\PCA_Segmentation_MRRN_training\MRRN_PCA_Training\visualisation\mixup\nki_resampled")
+                        visualize_metatensor_slices(adc=adc, t2=t2w, label_data=label_val,
+                                                    prediction_data=seg_temp, save_folder=visualization_folder,
+                                                    dice_score=dice_2D_temp)
+                    else:
+                        pass
                     dice_2D.append(dice_2D_temp)
 
 
