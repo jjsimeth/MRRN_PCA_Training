@@ -1,6 +1,6 @@
 from .base_options import BaseOptions
 
-class TrainingOptions(BaseOptions):
+class TrainOptions(BaseOptions):
     def initialize(self):
         BaseOptions.initialize(self)
         self.parser.add_argument('--out_wt', type=float, default=0.75, help='Weight for output vs. deep layer outputs')
@@ -19,14 +19,24 @@ class TrainingOptions(BaseOptions):
         self.parser.add_argument('--niter', type=int, default=100, help='# of iter at starting learning rate')
 
         self.parser.add_argument('--optimizer', type=str, default='AdamW', help='which epoch to load? set to latest to use latest cached model')
-        self.parser.add_argument('--loss', type=str, default='dece', help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
+        self.parser.add_argument('--loss', type=str, default='DML', help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
         self.parser.add_argument('--isTrain', type=int, default=True, help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
 
 
         self.parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
         
         
-        #self.parser.add_argument('--display_freq', type=int, default=200, help='frequency of showing training results on screen')
+        
+        self.parser.add_argument('--mixup_betadist',  type=float, default=1.0, help='values of alpha and beta to define beta distribtiion for mixup lambda')
+        self.parser.add_argument('--unfreeze_fraction1',  type=float, default=0.1, help='values of alpha and beta to define beta distribtiion for mixup lambda')
+        self.parser.add_argument('--unfreeze_fraction2',  type=float, default=0.5, help='values of alpha and beta to define beta distribtiion for mixup lambda')
+        self.parser.add_argument('--extra_neg_slices', type=int, default=1, help='added slices on either side of lesion for negative examples')
+
+        # self.parser.add_argument('--unfreeze_fraction3',  type=float, default=1.0, help='values of alpha and beta to define beta distribtiion for mixup lambda')
+        # self.parser.add_argument('--unfreeze_fraction4',  type=float, default=1.0, help='values of alpha and beta to define beta distribtiion for mixup lambda')
+        
+        
+        self.parser.add_argument('--display_freq', type=int, default=10, help='frequency of computing vlidaiton results on screen')
         #self.parser.add_argument('--ct_seg_val_freq', type=int, default=2000, help='frequency of showing training results on screen')
         #self.parser.add_argument('--CT_merge_alpha', type=float, default=0.25, help='frequency of showing training results on screen')
         #self.parser.add_argument('--out_wt', type=float, default=0.75, help='Weight for output vs. deep layer outputs')

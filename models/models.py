@@ -4,7 +4,7 @@ def create_model(opt):
     print(opt.model)
     if opt.model == 'MRRN_Segmentor':
         from .MRI_model import MRRN_Segmentor 
-        model = MRRN_Segmentor() #cycle_gan_unet_ct_seg_baseline()
+        model = MRRN_Segmentor()
     else:
         raise ValueError("Model [%s] not recognized." % opt.model)
     
