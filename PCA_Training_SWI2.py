@@ -36,16 +36,21 @@ from options.train_options import TrainingOptions
 from models.models import create_model
 # from util import util
 from PCA_DIL_inference_utils import sliding_window_inference 
+import pathlib
 
 
 # from pathlib import Path
 from glob import glob
 
-from typing import Tuple
+from typing import Tuple, Optional
 import monai
 from monai.handlers.utils import from_engine
-from monai.data import DataLoader, create_test_image_3d
+from monai.data import DataLoader, create_test_image_3d, MetaTensor
 from monai.data import decollate_batch
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+import pandas as pd
 
 
 #from monai.inferers import SliceInferer
@@ -138,7 +143,8 @@ def find_file_with_string(folder_path, target_string):
 
 def visualize_metatensor_slices(adc: "MetaTensor", t2: "MetaTensor", label_data: "MetaTensor",
                                 prediction_data: np.ndarray, save_folder: Optional[pathlib.Path] = None,
-                                dice_score:Optional[float] = None) -> Optional[
+                                dice_score:Optional[float] = None, epoch:Optional[int] = None,
+                                input_data:Optional[str] = None) -> Optional[
     pathlib.Path]:
     """
     Visualize all slices from ADC and T2 MetaTensor objects with label contours and prediction overlays in a single figure.
@@ -175,10 +181,26 @@ def visualize_metatensor_slices(adc: "MetaTensor", t2: "MetaTensor", label_data:
 
     # Create figure with two columns
     fig, axes = plt.subplots(num_slices, 2, figsize=(10, 5 * num_slices))
-    if dice_score:
-        fig.suptitle(f"ADC and T2 Slices with Ground Truth and Prediction Contours. Dice: {dice_score}", fontsize=16)
-    else:
-        fig.suptitle("ADC and T2 Slices with Ground Truth and Prediction Contours", fontsize=16)
+
+    def create_suptitle(dice_score=None, epoch=None, input_data=None):
+        title = "ADC and T2 Slices with Ground Truth and Prediction Contours"
+
+        if dice_score is not None:
+            title += f"\nDice: {dice_score}"
+
+        additional_info = []
+        if epoch is not None:
+            additional_info.append(f"Epoch: {epoch}")
+        if input_data is not None:
+            l_input_data= input_data.split(',')
+            for line in l_input_data:
+                additional_info.append(f"Input: {line}")
+        if additional_info:
+            title += f"\n{' | '.join(additional_info)}"
+
+        return title
+
+    fig.suptitle(create_suptitle(dice_score=dice_score, epoch=epoch, input_data=input_data), fontsize=16)
 
     for slice_index in range(num_slices):
         # Process images for the current slice
@@ -293,7 +315,7 @@ def train_stuff():
     # print(root_dir)
 
 
-    #get nii and seg data
+    #get nii and seg data prosx
     #nmodalities=2
     # impath = os.path.join(root_dir,'training_data') #load data
     # images = sorted(glob(os.path.join(root_dir, "adc*.nii.gz")))
@@ -417,14 +439,14 @@ def train_stuff():
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=5,
-        num_workers=1,
+        batch_size=1,
+        num_workers=0,
         pin_memory=torch.cuda.is_available(),
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=1,
-        num_workers=1,
+        num_workers=0,
         pin_memory=torch.cuda.is_available(),
     )
 
@@ -433,9 +455,11 @@ def train_stuff():
     print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
 
     epoch_loss_values = []
+    start_training = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
     num_epochs = 10000
     best_dice=0
     selected_slice = 2
+    dice_over_time = {}
     for epoch in range(num_epochs):
         # if epoch==100:
         #     model.netSeg_A.out_conv.requires_grad_(True)
@@ -471,10 +495,14 @@ def train_stuff():
                 model.set_input_sep(inputs,labels)
                 model.optimize_parameters()
         if (epoch%50)==0:
+                model.get_curr_lr()
+
+        if (epoch%5)==0:
             print("-" * 10)
             print(f"epoch {epoch + 1}/{num_epochs}. Current datetime: {datetime.datetime.now()}")
             print("-" * 10)
             with torch.no_grad(): # no grade calculation
+                loss_list = []
                 dice_2D=[]
                 smooth=1
                 step=0
@@ -550,16 +578,27 @@ def train_stuff():
                             r"D:\Projects\PCA_Segmentation_MRRN_training\MRRN_PCA_Training\visualisation\mixup\nki_resampled")
                         visualize_metatensor_slices(adc=adc, t2=t2w, label_data=label_val,
                                                     prediction_data=seg_temp, save_folder=visualization_folder,
-                                                    dice_score=dice_2D_temp)
+                                                    dice_score=dice_2D_temp, epoch=epoch, input_data=str(val_loader.dataset.data[step-1]))
                     else:
                         pass
                     dice_2D.append(dice_2D_temp)
+                    val_inp1 = val_inputs[0, :, :, :, :]
+                    val_inp2 = val_inputs.squeeze(dim=0)
+                    label_inp1 = label_val[0, 0, :, :, :]
+                    label_inp2 = label_val.squeeze(dim=0)
+                    # seg_loss = model.cal_seg_loss(model.netSeg_A, val_inp2, label_inp2)
+                    # loss_list.append(seg_loss.item())
 
 
 
 
-
+                # average_loss = np.average(loss_list)
                 dice_2D=np.average(dice_2D)
+
+                dice_over_time[f'{epoch}'] = [dice_2D,datetime.datetime.now()]
+                dice_df = pd.DataFrame(dice_over_time, index=['dice','datetime'])
+                dice_df.to_excel(f"dice_over_time_{start_training}.xlsx")
+                print(f'Updated excel at :"dice_over_time_{start_training}.xlsx"')
                 print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
                 if dice_2D>best_dice:
                         print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice)
