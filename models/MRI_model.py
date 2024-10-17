@@ -7,15 +7,238 @@ from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
 from math import floor,isnan
-from options.seg_options import SegmentationOptions
+#from options.seg_options import SegmentationOptions
+from options.train_options import TrainOptions
 
 import torch.nn.functional as F
 
 import torch.nn as nn
 
-opt = SegmentationOptions().parse()
+#opt = SegmentationOptions().parse()
+opt2 = TrainOptions().parse()
 num_organ = 1
-imsize = opt.fineSize #448
+imsize = opt2.fineSize #448
+
+from torch.nn.modules.loss import _Loss
+
+
+class JDTLoss(_Loss):
+    def __init__(self,
+                 mIoUD=1.0,
+                 mIoUI=0.0,
+                 mIoUC=0.0,
+                 alpha=1.0,
+                 beta=1.0,
+                 gamma=1.0,
+                 smooth=1e-3,
+                 threshold=0.01,
+                 norm=1,
+                 log_loss=False,
+                 ignore_index=None,
+                 class_weights=None,
+                 active_classes_mode_hard="PRESENT",
+                 active_classes_mode_soft="ALL"):
+        """
+        Arguments:
+            mIoUD (float): The weight of the loss to optimize mIoUD.
+            mIoUI (float): The weight of the loss to optimize mIoUI.
+            mIoUC (float): The weight of the loss to optimize mIoUC.
+            alpha (float): The coefficient of false positives in the Tversky loss.
+            beta (float): The coefficient of false negatives in the Tversky loss.
+            gamma (float): When `gamma` > 1, the loss focuses more on
+                less accurate predictions that have been misclassified.
+            smooth (float): A floating number to avoid `NaN` error.
+            threshold (float): The threshold to select active classes.
+            norm (int): The norm to compute the cardinality.
+            log_loss (bool): Compute the log loss or not.
+            ignore_index (int | None): The class index to be ignored.
+            class_weights (list[float] | None): The weight of each class.
+                If it is `list[float]`, its size should be equal to the number of classes.
+            active_classes_mode_hard (str): The mode to compute
+                active classes when training with hard labels.
+            active_classes_mode_soft (str): The mode to compute
+                active classes when training with hard labels.
+
+        Comments:
+            Jaccard: `alpha`  = 1.0, `beta`  = 1.0
+            Dice:    `alpha`  = 0.5, `beta`  = 0.5
+            Tversky: `alpha` >= 0.0, `beta` >= 0.0
+        """
+        super().__init__()
+
+        assert mIoUD >= 0 and mIoUI >= 0 and mIoUC >= 0 and \
+               alpha >= 0 and beta >= 0 and gamma >= 1 and \
+               smooth >= 0 and threshold >= 0
+        assert isinstance(norm, int) and norm > 0
+        assert ignore_index == None or isinstance(ignore_index, int)
+        assert class_weights == None or all((isinstance(w, float)) for w in class_weights)
+        assert active_classes_mode_hard in ["ALL", "PRESENT"]
+        assert active_classes_mode_soft in ["ALL", "PRESENT"]
+
+        self.mIoUD = mIoUD
+        self.mIoUI = mIoUI
+        self.mIoUC = mIoUC
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.smooth = smooth
+        self.threshold = threshold
+        self.norm = norm
+        self.log_loss = log_loss
+        self.ignore_index = ignore_index
+        if class_weights == None:
+            self.class_weights = class_weights
+        else:
+            self.class_weights = torch.tensor(class_weights)
+        self.active_classes_mode_hard = active_classes_mode_hard
+        self.active_classes_mode_soft = active_classes_mode_soft
+
+
+    def forward(self, logits, label, keep_mask=None):
+        """
+        Arguments:
+            logits (torch.Tensor): Its shape should be (B, C, D1, D2, ...).
+            label (torch.Tensor):
+                If it is hard label, its shape should be (B, D1, D2, ...).
+                If it is soft label, its shape should be (B, C, D1, D2, ...).
+            keep_mask (torch.Tensor | None):
+                If it is `torch.Tensor`,
+                    its shape should be (B, D1, D2, ...) and
+                    its dtype should be `torch.bool`.
+        """
+        batch_size, num_classes = logits.shape[:2]
+        hard_label = label.dtype == torch.long
+
+        logits = logits.view(batch_size, num_classes, -1)
+        prob = logits.log_softmax(dim=1).exp()
+
+        if keep_mask != None:
+            assert keep_mask.dtype == torch.bool
+            keep_mask = keep_mask.view(batch_size, -1)
+            keep_mask = keep_mask.unsqueeze(1).expand_as(prob)
+        elif self.ignore_index != None and hard_label:
+            keep_mask = label != self.ignore_index
+            keep_mask = keep_mask.view(batch_size, -1)
+            keep_mask = keep_mask.unsqueeze(1).expand_as(prob)
+
+        if hard_label:
+            label = torch.clamp(label, 0, num_classes - 1).view(batch_size, -1)
+            label = F.one_hot(label, num_classes=num_classes).permute(0, 2, 1).float()
+            active_classes_mode = self.active_classes_mode_hard
+        else:
+            label = label.view(batch_size, num_classes, -1)
+            active_classes_mode = self.active_classes_mode_soft
+
+        loss = self.forward_loss(prob, label, keep_mask, active_classes_mode)
+
+        return loss
+
+
+    def forward_loss(self, prob, label, keep_mask, active_classes_mode):
+        if keep_mask != None:
+            prob = prob * keep_mask
+            label = label * keep_mask
+
+        prob_card = torch.norm(prob, p=self.norm, dim=2)
+        label_card = torch.norm(label, p=self.norm, dim=2)
+        diff_card = torch.norm(prob - label, p=self.norm, dim=2)
+
+        if self.norm > 1:
+            prob_card = torch.pow(prob_card, exponent=self.norm)
+            label_card = torch.pow(label_card, exponent=self.norm)
+            diff_card = torch.pow(diff_card, exponent=self.norm)
+
+        tp = (prob_card + label_card - diff_card) / 2
+        fp = prob_card - tp
+        fn = label_card - tp
+
+        loss = 0
+        batch_size, num_classes = prob.shape[:2]
+        if self.mIoUD > 0:
+            active_classes = self.compute_active_classes(label, active_classes_mode, num_classes, (0, 2))
+            loss_mIoUD = self.forward_loss_mIoUD(tp, fp, fn, active_classes)
+            loss += self.mIoUD * loss_mIoUD
+
+        if self.mIoUI > 0 or self.mIoUC > 0:
+            active_classes = self.compute_active_classes(label, active_classes_mode, (batch_size, num_classes), (2, ))
+            loss_mIoUI, loss_mIoUC = self.forward_loss_mIoUIC(tp, fp, fn, active_classes)
+            loss += self.mIoUI * loss_mIoUI + self.mIoUC * loss_mIoUC
+
+        return loss
+
+
+    def compute_active_classes(self, label, active_classes_mode, shape, dim):
+        if active_classes_mode == "ALL":
+            mask = torch.ones(shape, dtype=torch.bool)
+        elif active_classes_mode == "PRESENT":
+            mask = torch.amax(label, dim) > self.threshold
+
+        active_classes = torch.zeros(shape, dtype=torch.bool, device=label.device)
+        active_classes[mask] = 1
+
+        return active_classes
+
+
+    def forward_loss_mIoUD(self, tp, fp, fn, active_classes):
+        if torch.sum(active_classes) < 1:
+            return 0. * torch.sum(tp)
+
+        tp = torch.sum(tp, dim=0)
+        fp = torch.sum(fp, dim=0)
+        fn = torch.sum(fn, dim=0)
+        tversky = (tp + self.smooth) / (tp + self.alpha * fp + self.beta * fn + self.smooth)
+
+        if self.log_loss:
+            loss_mIoUD = -torch.log(tversky)
+        else:
+            loss_mIoUD = 1.0 - tversky
+
+        if self.gamma > 1:
+            loss_mIoUD **= self.gamma
+
+        if self.class_weights != None:
+            loss_mIoUD *= self.class_weights
+
+        loss_mIoUD = loss_mIoUD[active_classes]
+        loss_mIoUD = torch.mean(loss_mIoUD)
+
+        return loss_mIoUD
+
+
+    def forward_loss_mIoUIC(self, tp, fp, fn, active_classes):
+        if torch.sum(active_classes) < 1:
+            return 0. * torch.sum(tp), 0. * torch.sum(tp)
+
+        tversky = (tp + self.smooth) / (tp + self.alpha * fp + self.beta * fn + self.smooth)
+
+        if self.log_loss:
+            loss_matrix = -torch.log(tversky)
+        else:
+            loss_matrix = 1.0 - tversky
+
+        if self.gamma > 1:
+            loss_matrix **= self.gamma
+
+        if self.class_weights != None:
+            class_weights = self.class_weights.unsqueeze(0).expand_as(loss_matrix)
+            loss_matrix *= class_weights
+
+        loss_matrix *= active_classes
+        loss_mIoUI = self.reduce(loss_matrix, active_classes, 1)
+        loss_mIoUC = self.reduce(loss_matrix, active_classes, 0)
+
+        return loss_mIoUI, loss_mIoUC
+
+
+    def reduce(self, loss_matrix, active_classes, dim):
+        active_sum = torch.sum(active_classes, dim)
+        active_dim = active_sum > 0
+        loss = torch.sum(loss_matrix, dim)
+        loss = loss[active_dim] / active_sum[active_dim]
+        loss = torch.mean(loss)
+
+        return loss
+
 
 
 class One_Hot(nn.Module):
@@ -65,6 +288,90 @@ class SoftDiceLoss(nn.Module):
 
         return score
 
+
+
+
+class DiceSemimetricLoss(nn.Module):
+    def __init__(self,num_organ=1):
+        super(DiceSemimetricLoss, self).__init__()
+
+        self.num_organ=num_organ
+    def forward(self, pred_stage1, organ_target):
+        """
+        :param pred_stage1: (B, 9,  256, 256)
+        :param pred_stage2: (B, 9, 256, 256)
+        :param target: (B, 256, 256)
+        :return: Dice
+        
+        """
+        batch_size = pred_stage1.size(0)
+        num_organ=self.num_organ
+        pred_stage1 = F.softmax(pred_stage1, dim=1).view(batch_size,num_organ+1, -1)
+        organ_target = organ_target.view(batch_size,num_organ, -1)
+        smooth=1e-5
+        
+        
+        # loss
+        dice_stage1 = 0.0
+
+        organ_index=1
+        inter=abs(pred_stage1[:, organ_index,:]).sum()-abs(organ_target[:, organ_index,:]).sum()+(abs(pred_stage1[:, organ_index, :]-organ_target[:, organ_index, :])).sum()
+        union=abs(pred_stage1[:, organ_index,:]).sum()+abs(organ_target[:, organ_index,:]).sum()
+        
+        # inter=(2*pred_stage1[:, organ_index,:] * organ_target[:, organ_index ,:]).sum()
+        # union=(2*pred_stage1[:, organ_index, :] * organ_target[:, organ_index , :]).sum()+torch.sum(abs(pred_stage1[:, organ_index, :]-organ_target[:, organ_index, :]),1).sum()
+        print(inter)
+        print(union)
+        
+        dice_stage1+=(inter+smooth)/(union+smooth)
+        # print('organ %i: %f ' %(organ_index,torch.sum((inter+smooth)/ (union+smooth))))
+            
+        dice_stage1 /= (num_organ)
+        dice = dice_stage1 
+
+        # 
+        return (1 - dice).mean()
+
+
+
+
+
+
+
+
+
+
+
+class DiceSemimetricLoss(nn.Module):
+    def __init__(self,num_organ=1):
+        super(DiceSemimetricLoss, self).__init__()
+
+        self.num_organ=num_organ
+    def forward(self, input, target):
+        smooth = 1e-5
+        #print(np.shape(input))
+        batch_size = input.size(0)
+        
+        input = F.softmax(input, dim=1).view(batch_size, self.num_organ+1, -1)
+        input=input[:,self.num_organ,:]
+
+        target=target.contiguous().view(batch_size, self.num_organ, -1)
+
+        dice_stage1=0.0
+        # inter=(input * target).sum(dim=1).sum(dim=1)
+        # union=(input * target).sum(dim=1).sum(dim=1)+torch.sum(abs(input-target),1).sum(dim=1)
+       
+
+        inter=abs(input).sum()+abs(target).sum()-(abs(input-target)).sum()
+        union=abs(input).sum()+abs(target).sum()
+
+        # print(inter)
+        # print(union)
+        
+        dice = torch.sum((inter+smooth)/ (union+smooth))
+
+        # 
+        return (1 - dice).mean()
 
 class DiceLoss_test(nn.Module):
     def __init__(self,num_organ=6):
@@ -149,6 +456,7 @@ class MRRN_Segmentor(BaseModel):
 
         self.hdicetest=DiceLoss_test()
         self.dicetest=SoftDiceLoss()
+        self.DML_loss=JDTLoss(alpha = 0.5, beta = 0.5)#DiceSemimetricLoss()
         #MRRN
         self.netSeg_A=networks.get_Incre_MRRN_deepsup(opt.nchannels,1,opt.init_type,self.gpu_ids, opt.deeplayer)
         #flops, params = get_model_complexity_info(self.netSeg_A, (256, 256), as_strings=True, print_per_layer_stat=True)
@@ -164,7 +472,7 @@ class MRRN_Segmentor(BaseModel):
         if self.isTrain:
             self.old_lr = opt.lr
             self.fake_A_pool = ImagePool(opt.pool_size)
-            self.optimizer_Seg_A = torch.optim.Adam(self.netSeg_A.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999),amsgrad=True)
+            self.optimizer_Seg_A = torch.optim.AdamW(self.netSeg_A.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999),amsgrad=True)
             if opt.optimizer == 'SGD':
                 self.optimizer_Seg_A = torch.optim.SGD(self.netSeg_A.parameters(), lr=opt.lr, momentum=0.99)
             self.optimizers = []
@@ -225,6 +533,8 @@ class MRRN_Segmentor(BaseModel):
            dice_ce = 1
         if(self.opt.loss == 'ce'):
            CE_loss = 1
+        if(self.opt.loss == 'DML'):
+           DML_loss = 1
         if(self.opt.loss == 'soft_dsc'):
            Soft_dsc_loss = 1
         if(self.opt.loss == 'dice'):
@@ -256,6 +566,18 @@ class MRRN_Segmentor(BaseModel):
             loss=self.dicetest(input, target)    
         elif hdice_test:
             loss=self.hdicetest(input, target)    
+        elif DML_loss:
+            loss1=self.DML_loss(input[:,1,:], target)  
+            
+            n, c, h, w = input.size()
+            input=input.float()
+            log_p = F.log_softmax(input,dim=1)
+            log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+            target = target.view(target.numel())
+            target=target.long()
+            loss2 = F.nll_loss(log_p, target, weight=None, size_average=True)
+            loss=loss1*0.75+loss2*0.25
+        
         else: #dice_ce
            
             loss1=self.dicetest(input, target)   
