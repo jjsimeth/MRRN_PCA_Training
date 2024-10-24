@@ -1,5 +1,5 @@
 import multiprocessing as mp
-import PCA_Training_SWI2 as train
+import PCA_Training_SWI_rb as train
 import platform as plat
 
 if __name__ == '__main__':
@@ -15,4 +15,4 @@ if __name__ == '__main__':
         pass
 
     # Start training
-    train.train_stuff()
+    train.train()

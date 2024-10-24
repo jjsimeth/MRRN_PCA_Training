@@ -69,7 +69,7 @@ class FRRU(nn.Module):
         return pool_sm_out,residual_sm_out
 
 class Incre_MRRN_deepsup(nn.Module):
-    def __init__(self, n_channels, n_classes, deeplayer=0):
+    def __init__(self, n_channels, n_classes, deeplayer=1):
         super(Incre_MRRN_deepsup, self).__init__()
 
         self.deeplayer=deeplayer

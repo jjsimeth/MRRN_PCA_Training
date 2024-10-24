@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 from collections import OrderedDict
+
+from torch._C._te import Tensor
 from torch.autograd import Variable
 import util.util as util
 from util.image_pool import ImagePool
@@ -13,6 +15,8 @@ from options.train_options import TrainOptions
 import torch.nn.functional as F
 
 import torch.nn as nn
+
+from .incre_MRRN import Incre_MRRN_deepsup
 
 #opt = SegmentationOptions().parse()
 opt2 = TrainOptions().parse()
@@ -270,7 +274,8 @@ class SoftDiceLoss(nn.Module):
         smooth = 0.0001
         #print(np.shape(input))
         batch_size = input.size(0)
-        
+        target.double()
+
         # valid_mask = target.ne(-1)
         # target = target.masked_fill_(~valid_mask, 0)
         
@@ -302,34 +307,34 @@ class DiceSemimetricLoss(nn.Module):
         :param pred_stage2: (B, 9, 256, 256)
         :param target: (B, 256, 256)
         :return: Dice
-        
+
         """
         batch_size = pred_stage1.size(0)
         num_organ=self.num_organ
         pred_stage1 = F.softmax(pred_stage1, dim=1).view(batch_size,num_organ+1, -1)
-        organ_target = organ_target.view(batch_size,num_organ, -1)
+        organ_target = organ_target.double().view(batch_size,num_organ, -1)
         smooth=1e-5
-        
-        
+
+
         # loss
         dice_stage1 = 0.0
 
         organ_index=1
         inter=abs(pred_stage1[:, organ_index,:]).sum()-abs(organ_target[:, organ_index,:]).sum()+(abs(pred_stage1[:, organ_index, :]-organ_target[:, organ_index, :])).sum()
         union=abs(pred_stage1[:, organ_index,:]).sum()+abs(organ_target[:, organ_index,:]).sum()
-        
+
         # inter=(2*pred_stage1[:, organ_index,:] * organ_target[:, organ_index ,:]).sum()
         # union=(2*pred_stage1[:, organ_index, :] * organ_target[:, organ_index , :]).sum()+torch.sum(abs(pred_stage1[:, organ_index, :]-organ_target[:, organ_index, :]),1).sum()
         print(inter)
         print(union)
-        
+
         dice_stage1+=(inter+smooth)/(union+smooth)
         # print('organ %i: %f ' %(organ_index,torch.sum((inter+smooth)/ (union+smooth))))
-            
+
         dice_stage1 /= (num_organ)
-        dice = dice_stage1 
+        dice = dice_stage1
 
-        # 
+        #
         return (1 - dice).mean()
 
 
@@ -338,40 +343,40 @@ class DiceSemimetricLoss(nn.Module):
 
 
 
-
-
-
-
-class DiceSemimetricLoss(nn.Module):
-    def __init__(self,num_organ=1):
-        super(DiceSemimetricLoss, self).__init__()
-
-        self.num_organ=num_organ
-    def forward(self, input, target):
-        smooth = 1e-5
-        #print(np.shape(input))
-        batch_size = input.size(0)
-        
-        input = F.softmax(input, dim=1).view(batch_size, self.num_organ+1, -1)
-        input=input[:,self.num_organ,:]
-
-        target=target.contiguous().view(batch_size, self.num_organ, -1)
-
-        dice_stage1=0.0
-        # inter=(input * target).sum(dim=1).sum(dim=1)
-        # union=(input * target).sum(dim=1).sum(dim=1)+torch.sum(abs(input-target),1).sum(dim=1)
-       
-
-        inter=abs(input).sum()+abs(target).sum()-(abs(input-target)).sum()
-        union=abs(input).sum()+abs(target).sum()
-
-        # print(inter)
-        # print(union)
-        
-        dice = torch.sum((inter+smooth)/ (union+smooth))
-
-        # 
-        return (1 - dice).mean()
+#
+#
+#
+#
+# class DiceSemimetricLoss(nn.Module):
+#     def __init__(self,num_organ=1):
+#         super(DiceSemimetricLoss, self).__init__()
+#
+#         self.num_organ=num_organ
+#     def forward(self, input, target):
+#         smooth = 1e-5
+#         #print(np.shape(input))
+#         batch_size = input.size(0)
+#
+#         input = F.softmax(input, dim=1).view(batch_size, self.num_organ+1, -1)
+#         input=input[:,self.num_organ,:]
+#
+#         target=target.contiguous().view(batch_size, self.num_organ, -1)
+#
+#         dice_stage1=0.0
+#         # inter=(input * target).sum(dim=1).sum(dim=1)
+#         # union=(input * target).sum(dim=1).sum(dim=1)+torch.sum(abs(input-target),1).sum(dim=1)
+#
+#
+#         inter=abs(input).sum()+abs(target).sum()-(abs(input-target)).sum()
+#         union=abs(input).sum()+abs(target).sum()
+#
+#         # print(inter)
+#         # print(union)
+#
+#         dice = torch.sum((inter+smooth)/ (union+smooth))
+#
+#         #
+#         return (1 - dice).mean()
 
 class DiceLoss_test(nn.Module):
     def __init__(self,num_organ=6):
@@ -456,7 +461,9 @@ class MRRN_Segmentor(BaseModel):
 
         self.hdicetest=DiceLoss_test()
         self.dicetest=SoftDiceLoss()
+        self.ce_loss=nn.CrossEntropyLoss()
         self.DML_loss=JDTLoss(alpha = 0.5, beta = 0.5)#DiceSemimetricLoss()
+        #self.DML_loss=JDTLoss()
         #MRRN
         self.netSeg_A=networks.get_Incre_MRRN_deepsup(opt.nchannels,1,opt.init_type,self.gpu_ids, opt.deeplayer)
         #flops, params = get_model_complexity_info(self.netSeg_A, (256, 256), as_strings=True, print_per_layer_stat=True)
@@ -522,6 +529,8 @@ class MRRN_Segmentor(BaseModel):
         ##USE for CrossEntrophy
         CE_loss=0
         CE_ohm_loss=0
+        DML_loss=0
+
 
         
         Soft_dsc_loss=0
@@ -546,17 +555,21 @@ class MRRN_Segmentor(BaseModel):
            dice_ce = 0
 
         if CE_loss:    
-            #print(input.size())
-            n, c, h, w = input.size()
+            # #print(input.size())
+            # n, c, h, w = input.size()
+            # input=input.float()
+            # log_p = F.log_softmax(input,dim=1)
+            # log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+            # target = target.view(target.numel())
+            # target=target.long()
+            # loss = F.nll_loss(log_p, target, weight=None, size_average=True)
+            # #size_average=False
+            # #if size_average:
+            # #    loss /= float(target.numel())
             input=input.float()
-            log_p = F.log_softmax(input,dim=1)
-            log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
-            target = target.view(target.numel())
-            target=target.long()
-            loss = F.nll_loss(log_p, target, weight=None, size_average=True)
-            #size_average=False
-            #if size_average:
-            #    loss /= float(target.numel())
+
+            target=torch.stack((1.0-target,target),1).float()
+            loss = self.ce_loss(input,target)
             
         elif Soft_dsc_loss:       
             loss=self.soft_dice_loss(input,target)                
@@ -567,30 +580,37 @@ class MRRN_Segmentor(BaseModel):
         elif hdice_test:
             loss=self.hdicetest(input, target)    
         elif DML_loss:
-            loss1=self.DML_loss(input[:,1,:], target)  
-            
-            n, c, h, w = input.size()
-            input=input.float()
-            log_p = F.log_softmax(input,dim=1)
-            log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
-            target = target.view(target.numel())
-            target=target.long()
-            loss2 = F.nll_loss(log_p, target, weight=None, size_average=True)
-            loss=loss1*0.75+loss2*0.25
-        
+
+            # loss=self.DML_loss(F.softmax(input,dim=1)[:,1,:], target)
+
+            input = input.double()
+
+            target = torch.stack((1.0 - target, target), 1).double()
+
+            loss1 = self.DML_loss(input, target)
+            # loss2 = self.ce_loss(input,target)
+            # loss=loss1*0.75+loss2*0.25
+            loss = loss1
+
+
         else: #dice_ce
-           
-            loss1=self.dicetest(input, target)   
-            n, c, h, w = input.size()
-            input=input.float()
-            log_p = F.log_softmax(input,dim=1)
-            log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
-            target = target.view(target.numel())
-            target=target.long()
-            loss2 = F.nll_loss(log_p, target, weight=None, size_average=True)
-        
-            
-            loss=0.5*loss1+0.5*loss2
+
+            loss1 = self.dicetest(input.double(), target.double())
+            input = input.double()
+
+            target = torch.stack((1.0 - target, target), 1).double()
+            loss2 = self.ce_loss(input, target)
+            loss = loss1 * 0.75 + loss2 * 0.25
+            # n, c, h, w = input.size()
+            # input=input.float()
+            # log_p = F.log_softmax(input,dim=1)
+            # log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+            # target=torch.stack((1-target,target),3)
+            # target = target.view(-1, c)
+            # #target=target.long()
+            # loss2 = F.nll_loss(log_p, target, weight=None, size_average=True)
+
+            # loss=0.75*loss1+0.25*loss2
             
         return loss
 
@@ -759,7 +779,8 @@ class MRRN_Segmentor(BaseModel):
     def get_image_paths(self):
         return self.image_paths
     
-    def cal_seg_loss (self,netSeg,pred,gt):
+    def cal_seg_loss (self,netSeg: Incre_MRRN_deepsup , pred: Tensor, gt: Tensor):
+        """"""
         img=pred
         lmd = 1
         if(self.opt.model_type == 'deep'):

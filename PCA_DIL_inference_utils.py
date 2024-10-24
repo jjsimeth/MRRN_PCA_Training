@@ -193,7 +193,7 @@ def sliding_window_inference(
         seg_prob=seg_prob[:,[1],:,:]
         
         seg_prob=seg_prob.unsqueeze(4)
-        seg_prob=seg_prob.repeat(1, 1, 1, 1, 5) #make output match input volume
+        seg_prob=seg_prob.repeat(1, 1, 1, 1, roi_size[2]) #make output match input volume
 
         if not _initialized:  # init. buffer at the first iteration
             output_classes = seg_prob.shape[1]
