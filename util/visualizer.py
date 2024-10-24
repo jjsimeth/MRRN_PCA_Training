@@ -1,9 +1,18 @@
+import datetime
+import pathlib
+from typing import Optional, List, Dict, Union
+
 import numpy as np
 import os
 import ntpath
 import time
+
+from matplotlib import pyplot as plt
+import matplotlib.patches as plt_patch
+from monai.data import MetaTensor
+
 from . import util
-from . import html
+# from . import html
 #import matplotlib
 #import matplotlib.pyplot as plt
 #plt.switch_backend('agg')
@@ -181,3 +190,133 @@ class Visualizer():
             txts.append(label)
             links.append(image_name)
         webpage.add_images(ims, txts, links, width=self.win_size)
+
+
+def visualize_case_slices(
+        image_data: List[Union["MetaTensor", np.ndarray]],
+        contour_data: List[Union["MetaTensor", np.ndarray]],
+        contour_colors: List[str],
+        contour_labels: List[str],
+        save_folder: Optional[pathlib.Path] = None,
+        additional_info: Optional[Dict[str, Union[float, int, str]]] = None,
+        case_id: Optional[str] = None
+) -> Optional[pathlib.Path]:
+    """
+    Visualize multiple image slices with contour overlays in a single figure.
+
+    This function takes lists of image data and contour data, and visualizes
+    all slices in one figure. The resulting plot shows images in columns,
+    with contour overlays on each image.
+
+    Args:
+        image_data (List[Union[MetaTensor, np.ndarray]]): List of image data (MetaTensor or numpy array).
+        contour_data (List[Union[MetaTensor, np.ndarray]]): List of contour data (MetaTensor or numpy array).
+        contour_colors (List[str]): List of colors for each contour.
+        contour_labels (List[str]): List of labels for each contour.
+        save_folder (Optional[pathlib.Path]): Path to the folder where the visualization should be saved.
+                                              If None, the plot is displayed but not saved.
+        additional_info (Optional[Dict[str, Union[float, int, str]]]): Dictionary containing additional
+                                                                       information to display in the title.
+        case_id (Optional[str]): Identifier for the specific case. If provided, it will be shown in the plot
+                                 and used in the filename when saving.
+
+    Returns:
+        Optional[pathlib.Path]: The path to the saved visualization if save_folder is provided, else None.
+
+    Example:
+        >>> adc = MetaTensor(...)  # 5D MetaTensor
+        >>> t2 = MetaTensor(...)   # 5D MetaTensor
+        >>> label = MetaTensor(...) # 5D MetaTensor
+        >>> prediction = np.array(...) # 3D numpy array
+        >>> visualize_patient_slices(
+        ...     image_data=[adc, t2],
+        ...     contour_data=[label, prediction],
+        ...     contour_colors=['r', 'b'],
+        ...     contour_labels=['Ground Truth', 'Prediction'],
+        ...     save_folder=pathlib.Path('./output'),
+        ...     additional_info={'Dice': 0.85, 'Epoch': 10},
+        ...     case_id='CASE001'
+        ... )
+    """
+    # Ensure inputs are valid
+    if len(image_data) != len(contour_data):
+        raise ValueError("Number of image data and contour data must match")
+
+    if len(contour_data) != len(contour_colors) or len(contour_data) != len(contour_labels):
+        raise ValueError("Number of contour data, colors, and labels must match")
+
+    # Process image and contour data
+    processed_images = []
+    processed_contours = []
+
+    for img, contour in zip(image_data, contour_data):
+        if isinstance(img, MetaTensor):
+            img = img[0, 0, :, :, :].cpu().numpy()
+        processed_images.append(img)
+
+        if isinstance(contour, MetaTensor):
+            contour = contour[0, 0, :, :, :].cpu().numpy()
+        processed_contours.append(contour)
+
+    num_images = len(processed_images)
+    num_slices = processed_images[0].shape[2]  # Assuming the last dimension is the number of slices
+
+    # Create figure with columns for each image type
+    fig, axes = plt.subplots(num_slices, num_images, figsize=(5 * num_images, 5 * num_slices))
+
+    def create_suptitle(additional_info, case_id):
+        title = "Image Slices with Contour Overlays"
+        if case_id:
+            title += f"\nCase ID: {case_id}"
+        if additional_info:
+            info_strings = [f"{key}: {value}" for key, value in additional_info.items()]
+            title += f"\n{' | '.join(info_strings)}"
+        return title
+
+    fig.suptitle(create_suptitle(additional_info, case_id), fontsize=16)
+
+    def plot_slice(ax, image_slice, contour_slices, contour_colors, slice_index, image_type):
+        ax.imshow(image_slice, cmap='gray')
+        for contour_slice, color in zip(contour_slices, contour_colors):
+            ax.contour(contour_slice, colors=color, linewidths=0.5)
+        ax.axis('off')
+        ax.set_title(f'{image_type} Slice {slice_index}')
+
+    def get_legend_elements(contour_labels, contour_colors):
+        return [plt_patch.Patch(facecolor=color, edgecolor=color, label=label)
+                for label, color in zip(contour_labels, contour_colors)]
+
+    for slice_index in range(num_slices):
+        for img_index, (image, contours) in enumerate(zip(processed_images, processed_contours)):
+            ax = axes[slice_index, img_index] if num_images > 1 else axes[slice_index]
+            image_slice = image[:, :, slice_index]
+            contour_slices = [contour[:, :, slice_index] for contour in processed_contours]
+            plot_slice(ax, image_slice, contour_slices, contour_colors, slice_index, f'Image {img_index + 1}')
+
+    # Add legend to the figure
+    legend_elements = get_legend_elements(contour_labels, contour_colors)
+    fig.legend(handles=legend_elements, loc='lower center', ncol=len(contour_labels), bbox_to_anchor=(0.5, 0.02))
+
+    # Adjust the layout
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.05, top=0.95)  # Make room for the legend and title
+
+    # Save the visualization if save_folder is provided
+    if save_folder:
+        save_folder = pathlib.Path(save_folder)
+        save_folder.mkdir(parents=True, exist_ok=True)
+        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if case_id:
+            file_name = f'case_{case_id}_visualization_{current_time}.png'
+        else:
+            file_name = f'case_visualization_{current_time}.png'
+
+        image_path = save_folder / file_name
+        plt.savefig(image_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved visualization to: {image_path}")
+        return image_path
+    else:
+        plt.show()
+        return None
