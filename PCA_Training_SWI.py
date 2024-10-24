@@ -76,6 +76,9 @@ from monai.transforms import (
     RandGaussianNoised,
     RandGaussianSmoothd,
     ScaleIntensityRangePercentilesd,
+    RandAdjustContrastd,
+    RandHistogramShiftd,
+    RandBiasFieldd,
 )
 
 
@@ -163,12 +166,12 @@ model = create_model(opt)
 model_path = os.path.join(root_dir,'deep_model','MRRNDS_model') #load weights
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.load_MR_seg_A(model_path) #use weights
+#model.load_MR_seg_A(model_path) #use weights
 # model.to(device)
 
 #freeze all layers
-for param in model.netSeg_A.parameters():
-        param.requires_grad = False
+#for param in model.netSeg_A.parameters():
+#        param.requires_grad = False
 
                 
 #impath = os.path.join(path,'nii_vols') #load weights
@@ -177,8 +180,20 @@ valpath = os.path.join(root_dir,'validation_data') #load weights
 
 
 #unfreeze final layer and Channel input block for finetuning
-model.netSeg_A.CNN_block1.requires_grad_(True)
-model.netSeg_A.out_conv.requires_grad_(True)
+# model.netSeg_A.CNN_block1.requires_grad_(True)
+# model.netSeg_A.out_conv.requires_grad_(True)
+# model.netSeg_A.out_conv1.requires_grad_(True)
+# if opt.deeplayer>0:
+#     model.netSeg_A.deepsupconv.requires_grad_(True)
+    
+    
+wt_path=root_dir+'ct_seg_val_loss.csv'
+
+fd_results = open(wt_path, 'w')
+fd_results.write('train loss, seg accuracy,\n')
+
+    
+    
 # model.netSeg_A.out_conv.requires_grad_(True)
 
 #we can unfreeze other layers either right away or on a epoch based schedule
@@ -228,6 +243,13 @@ val_images_t2w = sorted(glob(os.path.join(valpath, "*_t2_tse*.nii.gz"))) #t2w ke
 # print(images)
 # print(segs)
 # print(images_t2w)
+
+# print(val_images)
+# print(val_segs)
+# print(val_images_t2w)
+
+
+
 #can add additional modalities with thier keyname
 #images_ktrans = sorted(glob(os.path.join(root_dir, "ktrans*.nii.gz")))
 
@@ -263,14 +285,22 @@ train_transforms = Compose(
                     mode="nearest"),
         
         #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-        ScaleIntensityRangePercentilesd(keys="t2w",lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
+        RandAdjustContrastd(keys=["img"],prob=0.25),
+        RandHistogramShiftd(keys=["img"],prob=0.25),
+        RandBiasFieldd(keys=["img"], prob=0.25),
+        RandAdjustContrastd(keys=["t2w"],prob=0.25),
+        RandHistogramShiftd(keys=["t2w"],prob=0.25),
+        RandBiasFieldd(keys=["t2w"], prob=0.25),
+
+        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=95,b_min=-1.0,b_max=1.0,clip=True),
         #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
         #ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
         #RandRotate90d(keys=["img","t2w","seg"], prob=0.1, spatial_axes=[0, 1]),
-        RandGaussianNoised(keys=["img","t2w"], prob=0.1),
-        RandGaussianSmoothd(keys=["img","t2w"], prob=0.1),
+        RandGaussianNoised(keys=["img","t2w"], prob=0.25),
+        RandGaussianSmoothd(keys=["img","t2w"], prob=0.25),
         #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
+        
         CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
         RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
         RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
@@ -299,7 +329,7 @@ val_transforms = Compose(
                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
                     mode="nearest"),
         
-        ScaleIntensityRangePercentilesd(keys="t2w",lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
+        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=95,b_min=-1.0,b_max=1.0,clip=True),
         #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
         #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
@@ -361,23 +391,25 @@ for epoch in range(num_epochs+1):
     lr=model.get_curr_lr()
     # if epoch==100:
     #     model.netSeg_A.out_conv.requires_grad_(True)
-    if epoch==round(num_epochs*opt.unfreeze_fraction1):    
-        print('  >>unfreeze layer 2 and RU11')
-        model.netSeg_A.CNN_block2.requires_grad_(True)
-        model.netSeg_A.RU11.requires_grad_(True)
-    if epoch==round(num_epochs*opt.unfreeze_fraction2):
-        print('  >>unfreeze layer 3, RU1,RU2,RU3, RU33 and RU22')
-        # model.netSeg_A.CNN_block2.requires_grad_(True)
-        model.netSeg_A.CNN_block3.requires_grad_(True)
-        model.netSeg_A.RU1.requires_grad_(True)
-        model.netSeg_A.RU2.requires_grad_(True)
-        model.netSeg_A.RU3.requires_grad_(True)
+    # if epoch==round(num_epochs*opt.unfreeze_fraction1):    
+    #     print('  >>unfreeze layer 2 and RU11')
+    #     model.netSeg_A.CNN_block2.requires_grad_(True)
+    #     model.netSeg_A.RU11.requires_grad_(True)
+    # if epoch==round(num_epochs*opt.unfreeze_fraction2):
+    #     print('  >>unfreeze layer 3, RU1,RU2,RU3, RU33 and RU22')
+    #     # model.netSeg_A.CNN_block2.requires_grad_(True)
+    #     model.netSeg_A.CNN_block3.requires_grad_(True)
+    #     model.netSeg_A.RU1.requires_grad_(True)
+    #     model.netSeg_A.RU2.requires_grad_(True)
+    #     model.netSeg_A.RU3.requires_grad_(True)
         
-        #last 3 layers (not counting output conv)    
-        model.netSeg_A.RU33.requires_grad_(True)
-        model.netSeg_A.RU22.requires_grad_(True)
-        # model.netSeg_A.RU11.requires_grad_(True)
-    #if epoch==round(num_epochs*0.9):
+    #     #last 3 layers (not counting output conv)    
+    #     model.netSeg_A.RU33.requires_grad_(True)
+    #     model.netSeg_A.RU22.requires_grad_(True)
+    #     # model.netSeg_A.RU11.requires_grad_(True)
+    # if epoch==round(num_epochs*0.9):
+    #     for param in model.netSeg_A.parameters():
+    #         param.requires_grad = True
     # print("-" * 10)
     # print(f"epoch {epoch + 1}/{num_epochs}")
     epoch_loss, step = 0, 0
@@ -391,20 +423,41 @@ for epoch in range(num_epochs+1):
         # img_name=t2w.meta['filename_or_obj']
         # print(img_name)
         
-        if torch.sum(labels)>0:
-            adc=scale_ADC(adc)
-            
-            inputs=torch.cat((adc,t2w),dim=1)
-            labels=labels[:,np.long((opt.nslices-1)/2),:,:]
-            
-    
-            labels=  torch.clamp(labels,0.01,0.99)
-            inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
-            #inputs, labels = mixup(inputs, labels, np.random.beta(0.2, 0.2))
-             #label smoothing
-            
-            model.set_input_sep(inputs,labels)
-            model.optimize_parameters()
+        #if torch.sum(labels)>0:
+        # for ibatch in range(0,opt.batchSize+1):
+        #     adc[ibatch,:]=scale_ADC(adc[ibatch,:])
+        
+        inputs=torch.cat((adc,t2w),dim=1)
+        labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
+        #labels=labels[:,2,:,:]
+        
+        
+        labels=  torch.clamp(labels,0.001,0.999).float()
+        inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
+        # inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
+        
+        #inputs, labels = mixup(inputs, labels, np.random.beta(0.2, 0.2))
+         #label smoothing
+        
+        model.set_input_sep(inputs,labels)
+        model.optimize_parameters()
+        
+        
+    if (epoch%opt.display_freq)==0:      
+    #                     # save_result = total_steps % opt.update_html_freq == 0
+    #                     # visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
+                        errors = model.get_current_errors()['Seg_loss']
+                        
+                        # message = '(epoch: %d) ' %epoch
+                        # for k, v in errors.items():
+                        #     message += '%s: %.3f ' % (k, v)
+                        #     print(message)
+
+                        #t = (time.time() - iter_start_time) / opt.batchSize
+                        print (errors)
+                        #visualizer.print_current_errors(epoch, epoch_iter, errors, t)    
+        
+        
     if (epoch%opt.display_freq)==0:
         print("-" * 10)
         print(f"epoch {epoch}/{num_epochs}")
@@ -419,7 +472,7 @@ for epoch in range(num_epochs+1):
         
                 label_val_vol=label_val
                 #if torch.sum(label_val)>0:
-                adc=scale_ADC(adc)
+                # adc=scale_ADC(adc)
                 
                 val_inputs=torch.cat((adc,t2w),dim=1)
                
@@ -486,6 +539,11 @@ for epoch in range(num_epochs+1):
                 
             dice_2D=np.average(dice_2D)
             print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
+            
+            fd_results.write(str(dice_2D) + '\n')
+            fd_results.flush()  
+            
+                    
             if dice_2D>best_dice:
                     print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
                     im_iter=0
@@ -498,7 +556,7 @@ for epoch in range(num_epochs+1):
                         
                         label_val_vol=label_val
                         #if torch.sum(label_val)>0:
-                        adc=scale_ADC(adc)
+                        # adc=scale_ADC(adc)
                         
                         val_inputs=torch.cat((adc,t2w),dim=1)
                        
@@ -507,7 +565,7 @@ for epoch in range(num_epochs+1):
                             #pass model segmentor and region info
                             #input, roi size, sw batch size, model, overlap (0.5)
                             vol_data["pred"] = sliding_window_inference(val_inputs,
-                                                                        (128, 128, 5),
+                                                                        (128, 128, opt.nslices),
                                                                         1,
                                                                         model.netSeg_A,
                                                                         overlap=0.66,
