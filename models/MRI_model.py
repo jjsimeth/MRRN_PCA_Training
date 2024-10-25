@@ -20,7 +20,7 @@ num_organ = 1
 imsize = opt2.fineSize #448
 
 from torch.nn.modules.loss import _Loss
-
+#from sklearn.utils.class_weight import compute_class_weight
 
 class JDTLoss(_Loss):
     def __init__(self,
@@ -260,14 +260,43 @@ class One_Hot(nn.Module):
         return self.__class__.__name__ + "({})".format(self.depth)
 
 
+# class SoftDiceLoss(nn.Module):
+#     def __init__(self, n_classes=2):
+#         super(SoftDiceLoss, self).__init__()
+#         self.one_hot_encoder = One_Hot(n_classes).forward
+#         self.n_classes = n_classes
+
+#     def forward(self, input, target):
+#         smooth = 0.0001
+#         #print(np.shape(input))
+#         batch_size = input.size(0)
+#         target.double()
+#         # valid_mask = target.ne(-1)
+#         # target = target.masked_fill_(~valid_mask, 0)
+        
+#         input = F.softmax(input, dim=1).view(batch_size, self.n_classes, -1)
+#         #target = self.one_hot_encoder(target).contiguous().view(batch_size, self.n_classes, -1)
+#         #target = F.softmax(target, dim=1).view(batch_size, self.n_classes, -1)
+#         target=torch.cat((1-target,target),1)
+#         target=target.contiguous().view(batch_size, self.n_classes, -1)
+
+#         inter = torch.sum(input * target , 2) + smooth
+#         union = torch.sum(input, 2) + torch.sum(target, 2) + smooth
+
+#         score = torch.sum(2.0 * inter / union)
+#         score = 1.0 - score / (float(batch_size) * float(self.n_classes))
+
+#         return score
+
 class SoftDiceLoss(nn.Module):
-    def __init__(self, n_classes=2):
+    def __init__(self, n_classes=2,DSC_smoothing=0.001):
         super(SoftDiceLoss, self).__init__()
-        self.one_hot_encoder = One_Hot(n_classes).forward
+        #self.one_hot_encoder = One_Hot(n_classes).forward
         self.n_classes = n_classes
+        self.DSC_smoothing=DSC_smoothing
 
     def forward(self, input, target):
-        smooth = 0.0001
+        smooth = self.DSC_smoothing #0.0001
         #print(np.shape(input))
         batch_size = input.size(0)
         target.double()
@@ -287,8 +316,6 @@ class SoftDiceLoss(nn.Module):
         score = 1.0 - score / (float(batch_size) * float(self.n_classes))
 
         return score
-
-
 
 
 class DiceSemimetricLoss(nn.Module):
@@ -374,7 +401,7 @@ class DiceSemimetricLoss(nn.Module):
 #         return (1 - dice).mean()
 
 class DiceLoss_test(nn.Module):
-    def __init__(self,num_organ=6):
+    def __init__(self,num_organ=1):
         super(DiceLoss_test, self).__init__()
 
         self.num_organ=num_organ
@@ -386,7 +413,7 @@ class DiceLoss_test(nn.Module):
         :return: Dice
         """
         pred_stage1 = F.softmax(pred_stage1, dim=1)
-        num_organ=1
+        num_organ=self.num_organ
         # 
         #[b,12,256,256]
         organ_target = torch.zeros((target.size(0), num_organ, imsize, imsize))
@@ -456,7 +483,7 @@ class MRRN_Segmentor(BaseModel):
 
         self.hdicetest=DiceLoss_test()
         self.dicetest=SoftDiceLoss()
-        self.ce_loss=nn.CrossEntropyLoss()
+        self.ce_loss=nn.CrossEntropyLoss(weight=torch.tensor([0.001, 0.999],dtype=torch.float).to(device),label_smoothing=0.01)
         self.DML_loss=JDTLoss(alpha = 0.5, beta = 0.5)#DiceSemimetricLoss()
         #self.DML_loss=JDTLoss()
         #MRRN
@@ -587,29 +614,45 @@ class MRRN_Segmentor(BaseModel):
             target=torch.stack((1.0-target,target),1).double()
             
             loss1=self.DML_loss(input, target)
-            # loss2 = self.ce_loss(input,target)
-            # loss=loss1*0.75+loss2*0.25
-            loss=loss1
+            loss2 = self.ce_loss(input,target)
+            loss=loss1*0.75+loss2*0.25
+            #loss=loss1
             
         else: #dice_ce
            
-            loss1=self.dicetest(input.double(), target.double())  
-            input=input.double()
+            # loss1=self.dicetest(input.double(), target.double())  
+            # input=input.double()
 
-            target=torch.stack((1.0-target,target),1).double()
-            loss2 = self.ce_loss(input,target)
-            loss=loss1*0.75+loss2*0.25
+            # target=torch.stack((1.0-target,target),1).double()
+            # loss2 = self.ce_loss(input,target)
+            # loss=loss1*0.75+loss2*0.25
+            # # n, c, h, w = input.size()
+            # # input=input.float()
+            # # log_p = F.log_softmax(input,dim=1)
+            # # log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+            # # target=torch.stack((1-target,target),3)
+            # # target = target.view(-1, c)
+            # # #target=target.long()
+            # # loss2 = F.nll_loss(log_p, target, weight=None, size_average=True)
+        
+            
+            #loss=0.75*loss1+0.25*loss2
+            loss1=self.dicetest(input, target)   
             # n, c, h, w = input.size()
             # input=input.float()
             # log_p = F.log_softmax(input,dim=1)
             # log_p = log_p.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
-            # target=torch.stack((1-target,target),3)
-            # target = target.view(-1, c)
-            # #target=target.long()
+            # target = target.view(target.numel())
+            # target=target.long()
             # loss2 = F.nll_loss(log_p, target, weight=None, size_average=True)
-        
+            target=torch.stack((1.0-target,target),1).double()
+            loss2=self.ce_loss(input,target)
             
-            # loss=0.75*loss1+0.25*loss2
+            # #print("DICE/OHEM %0.4f/" % loss1,"%0.4f" % loss2)
+            
+            
+            loss=0.75*loss1+0.25*loss2
+            #loss=loss1
             
         return loss
 

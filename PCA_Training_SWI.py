@@ -79,6 +79,8 @@ from monai.transforms import (
     RandAdjustContrastd,
     RandHistogramShiftd,
     RandBiasFieldd,
+    RandFlipd,
+    RandAxisFlipd,
 )
 
 
@@ -277,12 +279,12 @@ train_transforms = Compose(
         ResampleToMatchd(keys=["seg"],
                     key_dst="t2w",
                     mode="nearest"),
-        Spacingd(keys=["img","t2w"],
+        Spacingd(keys=["img","t2w","seg"],
                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                    mode="bilinear"),
-        Spacingd(keys=["seg"],
-                    pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                    mode="nearest"),
+                    mode=("bilinear","bilinear","nearest")),
+        
+        RandFlipd(keys=["img","t2w","seg"],prob=0.1),
+        RandAxisFlipd(keys=["img","t2w","seg"],prob=0.1,),
         
         #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
         RandAdjustContrastd(keys=["img"],prob=0.25),
@@ -292,17 +294,20 @@ train_transforms = Compose(
         RandHistogramShiftd(keys=["t2w"],prob=0.25),
         RandBiasFieldd(keys=["t2w"], prob=0.25),
 
-        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=95,b_min=-1.0,b_max=1.0,clip=True),
+        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=98,b_min=-1.0,b_max=1.0,clip=True),
         #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
         #ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
-        #RandRotate90d(keys=["img","t2w","seg"], prob=0.1, spatial_axes=[0, 1]),
+        #RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[0, 1]),
+        #RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[1, 2]),
         RandGaussianNoised(keys=["img","t2w"], prob=0.25),
         RandGaussianSmoothd(keys=["img","t2w"], prob=0.25),
         #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
         
+        #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[-1,-1,opt.extra_neg_slices+(opt.nslices-1)/2]),
         CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
-        RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
+        RandRotated(keys=["img","t2w","seg"], prob=1.0, range_x=3.0,mode=("bilinear","bilinear","nearest")),
+        CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[128, 128,-1]),
         RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
         Transposed(keys=["img", "seg","t2w"], indices =[3,2,1,0]),
         SqueezeDimd(keys=["img","t2w", "seg"],dim=-1), 
@@ -329,7 +334,7 @@ val_transforms = Compose(
                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
                     mode="nearest"),
         
-        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=95,b_min=-1.0,b_max=1.0,clip=True),
+        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=98,b_min=-1.0,b_max=1.0,clip=True),
         #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
         #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
