@@ -47,7 +47,7 @@ from glob import glob
 from typing import Tuple
 import monai
 from monai.handlers.utils import from_engine
-from monai.data import DataLoader, create_test_image_3d
+from monai.data import DataLoader, create_test_image_3d,PatchDataset
 from monai.data import decollate_batch
 
 
@@ -81,6 +81,7 @@ from monai.transforms import (
     RandBiasFieldd,
     RandFlipd,
     RandAxisFlipd,
+    RandSpatialCropSamplesd,
 )
 
 
@@ -224,31 +225,88 @@ fd_results.write('train loss, seg accuracy,\n')
 # print(root_dir)
 
 
-#get nii and seg data
-#nmodalities=2
-# images = sorted(glob(os.path.join(root_dir, "adc*.nii.gz")))
-images = sorted(glob(os.path.join(impath, "*_ep2d_diff_*.nii.gz"))) #adc keywords from filename
-#segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
-segs = sorted(glob(os.path.join(impath, "*t2_tse_tra*_ROI.nii.gz")))
-# images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
-images_t2w = sorted(glob(os.path.join(impath, "*_t2_tse*.nii.gz"))) #t2w keywords from filename
+# #get nii and seg data
+# #nmodalities=2
+# # images = sorted(glob(os.path.join(root_dir, "adc*.nii.gz")))
+# images = sorted(glob(os.path.join(impath, "*[_ep2d_diff_*.nii.gz][*ADC_p*.nii]"))) #adc keywords from filename
+# #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
+# segs = sorted(glob(os.path.join(impath, "*[t2_tse_tra*_ROI.nii.gz][T2w_p*.nii]")))
+# # images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
+# images_t2w = sorted(glob(os.path.join(impath, "*[_t2_tse*.nii.gz][GTV_p*.nii]"))) #t2w keywords from filename
 
 
 
-val_images = sorted(glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz"))) #adc keywords from filename
-#segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
-val_segs = sorted(glob(os.path.join(valpath, "*t2_tse_tra*_ROI.nii.gz")))
-# images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
-val_images_t2w = sorted(glob(os.path.join(valpath, "*_t2_tse*.nii.gz"))) #t2w keywords from filename
+types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz') # the tuple of file types
+images=[]
+for fname in types:
+   images.extend(glob(os.path.join(impath, fname)))
+images = sorted(images)
+
+types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz') # the tuple of file types
+segs=[]
+for fname in types:
+   segs.extend(glob(os.path.join(impath, fname)))
+segs = sorted(segs)
+   
+types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz') # the tuple of file types
+images_t2w=[]
+for fname in types:
+   images_t2w.extend(glob(os.path.join(impath, fname)))
+images_t2w = sorted(images_t2w)
+
+# #val_images = (glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz"))+glob(os.path.join(impath, "*ADC_p*.nii"))) #adc keywords from filename
+
+# #val_images = (glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz"))+glob(os.path.join(impath, "*ADC_p*.nii"))) #adc keywords from filename
+# val_images = glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz")) #adc keywords from filename
+# val_images.extend(glob(os.path.join(impath, "*ADC_p*.nii")))
+# val_images = sorted(val_images)
+# #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
+# #val_segs = sorted(glob(os.path.join(valpath, "*t2_tse_tra*_ROI.nii.gz"))+glob(os.path.join(impath, "*T2w_p*.nii")))
+
+# val_segs = glob(os.path.join(valpath, "*t2_tse_tra*_ROI.nii.gz")) #adc keywords from filename
+# val_segs.extend(glob(os.path.join(impath, "*T2w_p*.nii")))
+# val_segs = sorted(val_segs)
+
+
+# # images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
+# #val_images_t2w = sorted(glob(os.path.join(valpath, "*_t2_tse*.nii.gz"))+glob(os.path.join(impath, "*GTV_p*.nii"))) #t2w keywords from filename
+# val_images_t2w = glob(os.path.join(valpath, "*_t2_tse*.nii.gz")) #adc keywords from filename
+# val_images_t2w.extend(glob(os.path.join(impath, "*GTV_p*.nii")))
+# val_images_t2w = sorted(val_images_t2w)
+
+
+
+
+types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz') # the tuple of file types
+val_images=[]
+for fname in types:
+   val_images.extend(glob(os.path.join(valpath, fname)))
+val_images = sorted(val_images)
+
+types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz') # the tuple of file types
+val_segs=[]
+for fname in types:
+   val_segs.extend(glob(os.path.join(valpath, fname)))
+val_segs = sorted(val_segs)
+ 
+
+types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz') # the tuple of file types
+val_images_t2w=[]
+for fname in types:
+   val_images_t2w.extend(glob(os.path.join(valpath, fname)))
+val_images_t2w = sorted(val_images_t2w)
+
+
+
 
 
 # print(images)
 # print(segs)
 # print(images_t2w)
 
-# print(val_images)
-# print(val_segs)
-# print(val_images_t2w)
+print(val_images)
+print(val_segs)
+print(val_images_t2w)
 
 
 
@@ -269,49 +327,66 @@ val_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(val_i
 
 train_transforms = Compose(
     [
-        LoadImaged(keys=["img","t2w","seg"]),
-        EnsureChannelFirstd(keys=["img","t2w", "seg"]),
-        Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),     
-        
-        ResampleToMatchd(keys=["img"],
-                    key_dst="t2w",
-                    mode="bilinear"),
-        ResampleToMatchd(keys=["seg"],
-                    key_dst="t2w",
-                    mode="nearest"),
-        Spacingd(keys=["img","t2w","seg"],
-                    pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                    mode=("bilinear","bilinear","nearest")),
-        
-        RandFlipd(keys=["img","t2w","seg"],prob=0.1),
-        RandAxisFlipd(keys=["img","t2w","seg"],prob=0.1,),
-        
-        #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-        RandAdjustContrastd(keys=["img"],prob=0.25),
-        RandHistogramShiftd(keys=["img"],prob=0.25),
-        RandBiasFieldd(keys=["img"], prob=0.25),
-        RandAdjustContrastd(keys=["t2w"],prob=0.25),
-        RandHistogramShiftd(keys=["t2w"],prob=0.25),
-        RandBiasFieldd(keys=["t2w"], prob=0.25),
+            LoadImaged(keys=["img", "t2w", "seg"]),
+            EnsureChannelFirstd(keys=["img", "t2w", "seg"]),
+            Orientationd(keys=["img", "t2w", "seg"], axcodes="RAS"),
 
-        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=98,b_min=-1.0,b_max=1.0,clip=True),
-        #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
-        #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
-        #ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
-        #RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[0, 1]),
-        #RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[1, 2]),
-        RandGaussianNoised(keys=["img","t2w"], prob=0.25),
-        RandGaussianSmoothd(keys=["img","t2w"], prob=0.25),
-        #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
-        
-        #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[-1,-1,opt.extra_neg_slices+(opt.nslices-1)/2]),
-        CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
-        RandRotated(keys=["img","t2w","seg"], prob=1.0, range_x=3.0,mode=("bilinear","bilinear","nearest")),
-        CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[128, 128,-1]),
-        RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
-        Transposed(keys=["img", "seg","t2w"], indices =[3,2,1,0]),
-        SqueezeDimd(keys=["img","t2w", "seg"],dim=-1), 
-        EnsureTyped(keys=["img","t2w", "seg"]),
+            # ResampleToMatchd(keys=["img"],
+            #                  key_dst="t2w",
+            #                  mode="bilinear"),
+            # ResampleToMatchd(keys=["seg"],
+            #                  key_dst="t2w",
+            #                  mode="nearest"),
+            ResampleToMatchd(keys=["img","seg"],
+                             key_dst="t2w",
+                             mode=("bilinear", "nearest")),
+            Spacingd(keys=["img", "t2w", "seg"],
+                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                     mode=("bilinear", "bilinear", "nearest")),
+            CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[240, 240, -1]),
+            
+            RandFlipd(keys=["img", "t2w", "seg"], prob=0.5),
+            #RandAxisFlipd(keys=["img", "t2w", "seg"], prob=0.1,),
+
+            # ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
+            RandAdjustContrastd(keys=["img"], prob=0.1),
+            RandHistogramShiftd(keys=["img"], prob=0.1),
+            RandBiasFieldd(keys=["img"], prob=0.1),
+            RandAdjustContrastd(keys=["t2w"], prob=0.1),
+            RandHistogramShiftd(keys=["t2w"], prob=0.1),
+            RandBiasFieldd(keys=["t2w"], prob=0.1),
+            
+            RandGaussianNoised(keys=["img", "t2w"], prob=0.1),
+            RandGaussianSmoothd(keys=["img", "t2w"], prob=0.1),
+            
+            
+            ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=99, b_min=-1.0, b_max=1.0, clip=True),
+            # RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
+            # CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
+            # ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
+            # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[0, 1]),
+            # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[1, 2]),
+            
+            # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
+
+            # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[-1,-1,opt.extra_neg_slices+(opt.nslices-1)/2]),
+            
+
+           
+            
+            RandRotated(keys=["img", "t2w", "seg"], prob=1.0, range_x=0.0, range_y=1.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
+            RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.1, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
+            RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.0, range_y=0.0, range_z=0.1, mode=("bilinear", "bilinear", "nearest")),
+            
+            CropForegroundd(keys=["img", "t2w", "seg"], source_key="seg", margin=[96, 96, opt.extra_neg_slices + (opt.nslices - 1) / 2]),
+            
+            
+           
+            RandSpatialCropd(keys=["img", "t2w", "seg"], roi_size=(128, 128, opt.nslices), random_size=False,random_center =True),
+            Transposed(keys=["img", "seg", "t2w"], indices=[3, 2, 1, 0]),
+            SqueezeDimd(keys=["img", "t2w", "seg"], dim=-1),
+            EnsureTyped(keys=["img", "t2w", "seg"]),
+
     ]
 )
 
@@ -321,20 +396,14 @@ val_transforms = Compose(
         EnsureChannelFirstd(keys=["img","t2w", "seg"]),
         Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),     
         
-        ResampleToMatchd(keys=["img"],
-                    key_dst="t2w",
-                    mode="bilinear"),
-        ResampleToMatchd(keys=["seg"],
-                    key_dst="t2w",
-                    mode="nearest"),
-        Spacingd(keys=["img","t2w"],
-                    pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                    mode="bilinear"),
-        Spacingd(keys=["seg"],
-                    pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                    mode="nearest"),
+        ResampleToMatchd(keys=["img","seg"],
+                             key_dst="t2w",
+                             mode=("bilinear", "nearest")),
+        Spacingd(keys=["img", "t2w", "seg"],
+                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                     mode=("bilinear", "bilinear", "nearest")),
         
-        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=98,b_min=-1.0,b_max=1.0,clip=True),
+        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
         #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
         #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
@@ -342,11 +411,50 @@ val_transforms = Compose(
         #RandRotate90d(keys=["img","t2w","seg"], prob=0.5, spatial_axes=[0, 1]),
         #RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
         #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
+        #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[160, 160,-1]),
         CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
         #RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
         EnsureTyped(keys=["img","t2w", "seg"]),
     ]
 )
+
+
+# patch_transform = Compose(
+#     [   #RandSpatialCropSamplesd(keys=["img","t2w","seg"],num_samples=10, roi_size=(128, 128, opt.nslices),random_size=False),
+#         RandAdjustContrastd(keys=["img"],prob=0.2),
+#         RandHistogramShiftd(keys=["img"],prob=0.2),
+#         RandBiasFieldd(keys=["img"], prob=0.2),
+#         RandAdjustContrastd(keys=["t2w"],prob=0.2),
+#         RandHistogramShiftd(keys=["t2w"],prob=0.2),
+#         RandBiasFieldd(keys=["t2w"], prob=0.2),
+#         RandGaussianNoised(keys=["img","t2w"], prob=0.1),
+#         RandGaussianSmoothd(keys=["img","t2w"], prob=0.1),
+        
+        
+#         #SqueezeDimd(keys=["img","t2w", "seg"], dim=-1),  # squeeze the last dim
+#         #Resized(keys=["img","t2w", "seg"], spatial_size=[48, 48]),
+#         # to use crop/pad instead of resize:
+#         # ResizeWithPadOrCropd(keys=["img", "seg"], spatial_size=[48, 48], mode="replicate"),
+#     ]
+# )
+
+# num_samples=5    
+# patch_func = monai.transforms.RandSpatialCropSamplesd(
+#     keys=["img","t2w", "seg"],
+#     #roi_size=[128, 128, opt.extra_neg_slices+(opt.nslices-1)/2],  # dynamic spatial_size for the first two dimensions
+#     roi_size=[128, 128],
+#     num_samples=num_samples,
+#     random_size=False,
+# )
+    
+# volume_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
+# patch_ds = PatchDataset(
+#     volume_ds,
+#     transform=patch_transform,
+#     patch_func=patch_func,
+#     samples_per_image=num_samples,
+# )
+
 
 post_transforms = Compose([
         EnsureTyped(keys="pred"),
@@ -367,6 +475,9 @@ post_transforms = Compose([
 
 # 3D dataset with preprocessing transforms
 train_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
+#train_ds = monai.data.ShuffleBuffer(patch_ds, seed=0) #patch based trainer
+
+
 
 val_ds = monai.data.CacheDataset(data=val_files, transform=val_transforms)
 
@@ -387,6 +498,12 @@ val_loader = DataLoader(
 
 check_data = monai.utils.misc.first(train_loader)
 print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
+
+sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[0,:,:,:]), 'TRAINING_DEBUG_t2w.nii.gz')
+sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[0,:,:,:]), 'TRAINING_DEBUG_adc.nii.gz')
+sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[0,:,:,:]), 'TRAINING_DEBUG_SEG.nii.gz')
+
+
 
 num_epochs=opt.niter+opt.niter_decay
 epoch_loss_values = []
