@@ -24,7 +24,7 @@ class TrainOptions(BaseOptions):
 
 
         self.parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
-        
+        self.parser.add_argument('--data_folder', type=str, default='validation_data', help='folder for data to test.')
         
         
         self.parser.add_argument('--mixup_betadist',  type=float, default=1.0, help='values of alpha and beta to define beta distribtiion for mixup lambda')
