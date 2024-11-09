@@ -82,6 +82,7 @@ from monai.transforms import (
     RandFlipd,
     RandAxisFlipd,
     RandSpatialCropSamplesd,
+    RandSimulateLowResolutiond,
 )
 
 
@@ -188,14 +189,19 @@ valpath = os.path.join(root_dir,'validation_data') #load weights
 # model.netSeg_A.out_conv1.requires_grad_(True)
 # if opt.deeplayer>0:
 #     model.netSeg_A.deepsupconv.requires_grad_(True)
-    
-    
-wt_path=root_dir+'ct_seg_val_loss.csv'
-
+dest_path= os.path.join(root_dir,opt.name) 
+wt_path= os.path.join(root_dir,opt.name,'ct_seg_val_loss.csv')
+if not os.path.exists(dest_path):
+    os.makedirs(dest_path)
 fd_results = open(wt_path, 'w')
 fd_results.write('train loss, seg accuracy,\n')
 
-    
+results_path=os.path.join(root_dir,opt.name,'val_results')
+if not os.path.exists(results_path):
+    os.makedirs(results_path)   
+seg_path=os.path.join(root_dir,opt.name,'Output_segs')
+if not os.path.exists(seg_path):
+    os.makedirs(seg_path)    
     
 # model.netSeg_A.out_conv.requires_grad_(True)
 
@@ -343,26 +349,27 @@ train_transforms = Compose(
             Spacingd(keys=["img", "t2w", "seg"],
                      pixdim=(PD_in[0], PD_in[1], PD_in[2]),
                      mode=("bilinear", "bilinear", "nearest")),
-            CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[240, 240, -1]),
+            #CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[200, 200, -1]),
             
-            RandFlipd(keys=["img", "t2w", "seg"], prob=0.5),
-            #RandAxisFlipd(keys=["img", "t2w", "seg"], prob=0.1,),
+            
 
             # ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-            RandAdjustContrastd(keys=["img"], prob=0.1),
-            RandHistogramShiftd(keys=["img"], prob=0.1),
-            RandBiasFieldd(keys=["img"], prob=0.1),
-            RandAdjustContrastd(keys=["t2w"], prob=0.1),
-            RandHistogramShiftd(keys=["t2w"], prob=0.1),
-            RandBiasFieldd(keys=["t2w"], prob=0.1),
+            RandAdjustContrastd(keys=["img"], prob=0.15),
+            RandHistogramShiftd(keys=["img"], prob=0.15),
+            RandBiasFieldd(keys=["img"], prob=0.15),
+            RandAdjustContrastd(keys=["t2w"], prob=0.15),
+            RandHistogramShiftd(keys=["t2w"], prob=0.15),
+            RandBiasFieldd(keys=["t2w"], prob=0.15),
             
-            RandGaussianNoised(keys=["img", "t2w"], prob=0.1),
-            RandGaussianSmoothd(keys=["img", "t2w"], prob=0.1),
-            
+            RandGaussianNoised(keys=["img", "t2w"], prob=0.15),
+            RandGaussianSmoothd(keys=["img", "t2w"], prob=0.15),
+            #RandSimulateLowResolutiond(keys=["img", "t2w"], prob=0.15),
             
             ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=99, b_min=-1.0, b_max=1.0, clip=True),
             # RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
-            # CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
+            
+            CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
+           
             # ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
             # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[0, 1]),
             # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[1, 2]),
@@ -371,15 +378,17 @@ train_transforms = Compose(
 
             # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[-1,-1,opt.extra_neg_slices+(opt.nslices-1)/2]),
             
-
-           
-            
-            RandRotated(keys=["img", "t2w", "seg"], prob=1.0, range_x=0.0, range_y=1.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
-            RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.1, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
-            RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.0, range_y=0.0, range_z=0.1, mode=("bilinear", "bilinear", "nearest")),
-            
             CropForegroundd(keys=["img", "t2w", "seg"], source_key="seg", margin=[96, 96, opt.extra_neg_slices + (opt.nslices - 1) / 2]),
             
+
+            RandFlipd(keys=["img", "t2w", "seg"], prob=0.5),
+            RandAxisFlipd(keys=["img", "t2w", "seg"], prob=0.25),
+            
+            RandRotated(keys=["img", "t2w", "seg"], prob=1.0, range_x=1.0, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
+            # RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.1, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
+            # RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.0, range_y=0.0, range_z=0.1, mode=("bilinear", "bilinear", "nearest")),
+            
+
             
            
             RandSpatialCropd(keys=["img", "t2w", "seg"], roi_size=(128, 128, opt.nslices), random_size=False,random_center =True),
@@ -487,6 +496,7 @@ train_loader = DataLoader(
     batch_size=opt.batchSize,
     num_workers=1,
     pin_memory=torch.cuda.is_available(),
+    drop_last=True
 )
 val_loader = DataLoader(
     val_ds,
@@ -499,9 +509,9 @@ val_loader = DataLoader(
 check_data = monai.utils.misc.first(train_loader)
 print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
 
-sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[0,:,:,:]), 'TRAINING_DEBUG_t2w.nii.gz')
-sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[0,:,:,:]), 'TRAINING_DEBUG_adc.nii.gz')
-sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[0,:,:,:]), 'TRAINING_DEBUG_SEG.nii.gz')
+sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_t2w.nii.gz'))
+sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_adc.nii.gz'))
+sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_SEG.nii.gz'))
 
 
 
@@ -668,6 +678,8 @@ for epoch in range(num_epochs+1):
                     
             if dice_2D>best_dice:
                     print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
+                    model.save('AVG_best_finetuned')
+                    best_dice = dice_2D
                     im_iter=0
                     for vol_data in val_loader:
                         im_iter += 1
@@ -705,10 +717,10 @@ for epoch in range(num_epochs+1):
                         seg[seg >= 0.5]=1.0
                         seg[seg < 0.5]=0.0
                     
-                        sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % im_iter)
-                        sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % im_iter)
-                        sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % im_iter)
-                        sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % im_iter)
+                        sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), os.path.join(results_path,'val%i_t2w.nii.gz' % im_iter))
+                        sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()),  os.path.join(results_path,'val%i_adc.nii.gz' % im_iter))
+                        sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()),  os.path.join(results_path,'val%i_gtv.nii.gz' % im_iter))
+                        sitk.WriteImage(sitk.GetImageFromArray(seg),  os.path.join(results_path,'val%i_seg.nii.gz' % im_iter))
                         
                         vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
                         seg_out= from_engine(["pred"])(vol_data)[0]
@@ -723,10 +735,9 @@ for epoch in range(num_epochs+1):
                         im_obj = sitk.ReadImage(cur_rd_path)
                         seg_out = sitk.GetImageFromArray(seg_out)
                         seg_out = copy_info(im_obj, seg_out)
-                        sitk.WriteImage(seg_out, 'seg_%s' % img_name)
+                        sitk.WriteImage(seg_out,  os.path.join(seg_path,'seg_%s' % img_name))
 
 
-                    model.save('AVG_best_finetuned')
-                    best_dice = dice_2D
+
     if lr>0:
             model.update_learning_rate()
