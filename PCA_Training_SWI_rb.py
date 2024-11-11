@@ -5,10 +5,12 @@ Created on Fri Oct 27 13:41:09 2023
 @author: SimethJ
 """
 import pathlib
+import torch
+
 
 import pandas as pd
 
-from util.visualizer import visualize_case_slices
+from util.visualizer import visualize_train_case_slices, visualize_val_case_slices
 
 # -*- coding: utf-8 -*-
 """
@@ -83,6 +85,8 @@ from monai.transforms import (
     RandAdjustContrastd,
     RandHistogramShiftd,
     RandBiasFieldd,
+    RandFlipd,
+    RandAxisFlipd,
 )
 
 
@@ -212,7 +216,7 @@ def update_metrics_over_time_dict(dice_over_time: Dict, current_iteration_data: 
 #     print(f'Updated excel at: "{filename}"')
 #     return dice_over_time
 
-def get_case_dice_2D_temp(seg_data,label_data,smooth):
+def get_case_dice_2D_temp2(seg_data,label_data,smooth):
     # print("seg length: ", len(seg))
     seg = seg_data[0]
     # print("seg shape: ", np.shape(seg))
@@ -249,6 +253,46 @@ def get_case_dice_2D_temp(seg_data,label_data,smooth):
     return val_dice_2D_temp, seg_temp
 
 
+
+def get_case_dice_2D_temp(seg_data, label_data, smooth=1e-6):
+    """
+    Optimized 2D Dice score calculation using PyTorch operations on GPU.
+
+    Args:
+        seg_data: Predicted segmentation tensor (on GPU)
+        label_data: Ground truth label tensor (on GPU)
+        smooth: Smoothing factor to avoid division by zero
+
+    Returns:
+        tuple: (dice_score, processed_segmentation)
+    """
+    # Keep data on GPU and avoid unnecessary transfers
+    seg = seg_data[0]  # Assuming batch size of 1
+
+    # Squeeze
+    seg = torch.squeeze(seg)
+
+    # Binary thresholding
+    seg = (seg >= 0.5).float()
+
+    # Ensure label_data is on the same device as seg
+    label_data = label_data.to(seg.device)
+
+    # Flatten tensors using view
+    seg_flat = seg.view(-1)
+    gt_flat = (label_data > 0).float().view(-1)
+
+    # Calculate intersection and dice score
+    intersection = torch.sum(seg_flat * gt_flat)
+    dice_score = (2. * intersection + smooth) / (torch.sum(seg_flat) + torch.sum(gt_flat) + smooth)
+
+    # Only convert to CPU at the end if necessary
+    # dice_score_val = dice_score.item()
+    # print(dice_score_val)
+
+    return dice_score, seg
+
+
 def train():
     opt = TrainOptions().parse()
     opt.isTrain = True
@@ -258,10 +302,11 @@ def train():
     #Define input dimensions and resolution for inference model
     PD_in=np.array([0.6250, 0.6250, 3]) # millimeters
     DIM_in=np.array([128,128,opt.nslices]) # 128x128 5 Slices
+    # TODO: Check here if amount of wanted channels is used
     nmodalities=2
 
     root_dir=os.getcwd()
-    opt.nchannels=opt.nslices*nmodalities
+    # opt.nchannels=opt.nslices*nmodalities
 
     model = create_model(opt)
 
@@ -318,11 +363,11 @@ def train():
     # valpath = os.path.join(root_dir,'validation_data') #load weights
 
     # images = sorted(glob(os.path.join(root_dir, "adc*.nii.gz")))
-    # images = sorted(glob(os.path.join(impath, "*_ep2d_diff_*.nii.gz"))) #adc keywords from filename
+    # train_images = sorted(glob(os.path.join(impath, "*_ep2d_diff_*.nii.gz"))) #adc keywords from filename
     #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
-    # segs = sorted(glob(os.path.join(impath, "*t2_tse_tra*_ROI.nii.gz")))
+    # train_segs = sorted(glob(os.path.join(impath, "*t2_tse_tra*_ROI.nii.gz")))
     # images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
-    # images_t2w = sorted(glob(os.path.join(impath, "*_t2_tse*.nii.gz"))) #t2w keywords from filename
+    # train_images_t2w = sorted(glob(os.path.join(impath, "*_t2_tse*.nii.gz"))) #t2w keywords from filename
 
     # val_images = sorted(glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz"))) #adc keywords from filename
     #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
@@ -334,9 +379,9 @@ def train():
     impath = os.path.join(root_dir,'training_data\\nki_resampled\\train') #load data
     valpath = os.path.join(root_dir,'training_data\\nki_resampled\\val') #load weights
 
-    images = sorted(glob(os.path.join(impath, "*adc*.nii")))
-    segs = sorted(glob(os.path.join(impath, "*LES*.nii")))
-    images_t2w = sorted(glob(os.path.join(impath, "*tt2*.nii"))) #t2w keywords from filename
+    train_images = sorted(glob(os.path.join(impath, "*adc*.nii")))
+    train_segs = sorted(glob(os.path.join(impath, "*LES*.nii")))
+    train_images_t2w = sorted(glob(os.path.join(impath, "*tt2*.nii"))) #t2w keywords from filename
 
     val_images = sorted(glob(os.path.join(valpath, "*adc*.nii")))
     val_segs = sorted(glob(os.path.join(valpath, "*LES*.nii")))
@@ -356,7 +401,7 @@ def train():
 
     # n_val=3
     # n_train=7
-    train_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(images, segs, images_t2w)] #first n_train to training
+    train_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(train_images, train_segs, train_images_t2w)] #first n_train to training
     val_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(val_images, val_segs, val_images_t2w)] #last  n_val to validation
 
     # total_dataset = 10
@@ -373,79 +418,86 @@ def train():
 
     train_transforms = Compose(
         [
-            LoadImaged(keys=["img","t2w","seg"]),
-            EnsureChannelFirstd(keys=["img","t2w", "seg"]),
-            Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),
+            LoadImaged(keys=["img", "t2w", "seg"]),
+            EnsureChannelFirstd(keys=["img", "t2w", "seg"]),
+            Orientationd(keys=["img", "t2w", "seg"], axcodes="RAS"),
 
             ResampleToMatchd(keys=["img"],
-                        key_dst="t2w",
-                        mode="bilinear"),
-            # ResampleToMatchd(keys=["seg"],
-            #             key_dst="t2w",
-            #             mode="nearest"),
-            Spacingd(keys=["img","t2w"],
-                        pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                        mode="bilinear"),
-            Spacingd(keys=["seg"],
-                        pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                        mode="nearest"),
+                             key_dst="t2w",
+                             mode="bilinear"),
+            ResampleToMatchd(keys=["seg"],
+                             key_dst="t2w",
+                             mode="nearest"),
+            Spacingd(keys=["img", "t2w", "seg"],
+                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                     mode=("bilinear", "bilinear", "nearest")),
+            # RandRotate90d(keys=["img", "t2w", "seg"], prob=0.4, max_k=1),
+            RandFlipd(keys=["img", "t2w", "seg"], prob=0.5),
+            # RandAxisFlipd(keys=["img", "t2w", "seg"], prob=0.7),
 
-            #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-            RandAdjustContrastd(keys=["img"], prob=0.25),
-            RandHistogramShiftd(keys=["img"], prob=0.25),
-            RandBiasFieldd(keys=["img"], prob=0.25),
-            RandAdjustContrastd(keys=["t2w"], prob=0.25),
-            RandHistogramShiftd(keys=["t2w"], prob=0.25),
-            RandBiasFieldd(keys=["t2w"], prob=0.25),
+            # ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
+            RandAdjustContrastd(keys=["img"], prob=0.05),
+            RandHistogramShiftd(keys=["img"], prob=0.05),
+            RandBiasFieldd(keys=["img"], prob=0.05),
+            RandAdjustContrastd(keys=["t2w"], prob=0.05),
+            RandHistogramShiftd(keys=["t2w"], prob=0.05),
+            RandBiasFieldd(keys=["t2w"], prob=0.05),
 
-            ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=95, b_min=-1.0, b_max=1.0, clip=True),
-            #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
-            #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
-            #ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
-            #RandRotate90d(keys=["img","t2w","seg"], prob=0.1, spatial_axes=[0, 1]),
-            RandGaussianNoised(keys=["img", "t2w"], prob=0.25),
-            RandGaussianSmoothd(keys=["img", "t2w"], prob=0.25),
-            #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
+            ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=98, b_min=-1.0, b_max=1.0, clip=True),
+            # RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
+            # CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
+            # ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
+            # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[0, 1]),
+            # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[1, 2]),
+            RandGaussianNoised(keys=["img", "t2w"], prob=0.10),
+            RandGaussianSmoothd(keys=["img", "t2w"], prob=0.10),
+            # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
 
-            CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
-            RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
-            RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
-            Transposed(keys=["img", "seg","t2w"], indices =[3,2,1,0]),
-            SqueezeDimd(keys=["img","t2w", "seg"],dim=-1),
-            EnsureTyped(keys=["img","t2w", "seg"]),
+            # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[-1,-1,opt.extra_neg_slices+(opt.nslices-1)/2]),
+            CropForegroundd(keys=["img", "t2w", "seg"], source_key="seg",
+                            margin=[96, 96, opt.extra_neg_slices + (opt.nslices - 1) / 2]),
+            RandRotated(keys=["img", "t2w", "seg"], prob=1.0, range_x=1, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
+            # RandRotated(keys=["img", "t2w", "seg"], prob=0.6, range_x=0, range_y=0.1, range_z=0, mode=("bilinear", "bilinear", "nearest")),#add pitch
+            # RandRotated(keys=["img", "t2w", "seg"], prob=0.6, range_x=0, range_y=0, range_z=0.1, mode=("bilinear", "bilinear", "nearest")),#add yaw
+            CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[200, 200, -1]),
+            RandSpatialCropd(keys=["img", "t2w", "seg"], roi_size=(128, 128, opt.nslices), random_size=False),
+            Transposed(keys=["img", "seg", "t2w"], indices=[3, 2, 1, 0]),
+            SqueezeDimd(keys=["img", "t2w", "seg"], dim=-1),
+            EnsureTyped(keys=["img", "t2w", "seg"]),
         ]
     )
 
     val_transforms = Compose(
         [
-            LoadImaged(keys=["img","t2w","seg"]),
-            EnsureChannelFirstd(keys=["img","t2w", "seg"]),
-            Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),
+            LoadImaged(keys=["img", "t2w", "seg"]),
+            EnsureChannelFirstd(keys=["img", "t2w", "seg"]),
+            Orientationd(keys=["img", "t2w", "seg"], axcodes="RAS"),
 
             ResampleToMatchd(keys=["img"],
-                        key_dst="t2w",
-                        mode="bilinear"),
-            # ResampleToMatchd(keys=["seg"],
-            #             key_dst="t2w",
-            #             mode="nearest"),
-            Spacingd(keys=["img","t2w"],
-                        pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                        mode="bilinear"),
+                             key_dst="t2w",
+                             mode="bilinear"),
+            ResampleToMatchd(keys=["seg"],
+                             key_dst="t2w",
+                             mode="nearest"),
+            Spacingd(keys=["img", "t2w"],
+                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                     mode="bilinear"),
             Spacingd(keys=["seg"],
-                        pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                        mode="nearest"),
+                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                     mode="nearest"),
 
-            ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=95, b_min=-1.0, b_max=1.0, clip=True),
-            #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-            #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
-            #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
-            #ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
-            #RandRotate90d(keys=["img","t2w","seg"], prob=0.5, spatial_axes=[0, 1]),
-            #RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
-            #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
-            CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
-            #RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
-            EnsureTyped(keys=["img","t2w", "seg"]),
+            ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=98, b_min=-1.0, b_max=1.0, clip=True),
+            # ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
+            # RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
+            # CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
+            # ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
+            # RandRotate90d(keys=["img","t2w","seg"], prob=0.5, spatial_axes=[0, 1]),
+            # RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
+            # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
+            CropForegroundd(keys=["img", "t2w", "seg"], source_key="seg",
+                            margin=[96, 96, opt.extra_neg_slices + (opt.nslices - 1) / 2]),
+            # RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
+            EnsureTyped(keys=["img", "t2w", "seg"]),
         ]
     )
 
@@ -474,9 +526,11 @@ def train():
 
     train_loader = DataLoader(
         train_ds,
+        # batch_size=1,
         batch_size=opt.batchSize,
         num_workers=0,
         pin_memory=torch.cuda.is_available(),
+        # drop_last=True
     )
     val_loader = DataLoader(
         val_ds,
@@ -498,7 +552,8 @@ def train():
     epoch_zero_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
     print(f"Started training at {epoch_zero_datetime}")
     for epoch in range(num_epochs+1):
-        print(f"Current epoch: {epoch}, current datetime: {epoch_zero_datetime}")
+        current_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        print(f'Current epoch: {epoch}, current datetime: {current_datetime}')
         lr=model.get_curr_lr()
         # if epoch==100:
         #     model.netSeg_A.out_conv.requires_grad_(True)
@@ -523,6 +578,7 @@ def train():
         # print(f"epoch {epoch + 1}/{num_epochs}")
         epoch_loss, train_step = 0, 0
         train_dices =[]
+        train_label_slice_num = np.int32((opt.nslices-1)/2)
         for batch_data in train_loader:
             train_step += 1
 
@@ -535,16 +591,31 @@ def train():
 
             # if torch.sum(labels)>0:
             #     adc=scale_ADC(adc)
-
+            # TODO: Check here if amount of wanted channels is used
             inputs=torch.cat((adc,t2w),dim=1)
-            labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
+            labels=labels[:,train_label_slice_num,:,:]
 
             labels = torch.clamp(labels, 0.001, 0.999).float()
-            inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
-             #label smoothing
+            # inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
 
             model.set_input_sep(inputs,labels)
             model.optimize_parameters()
+            if (epoch % (num_epochs/2)) == 0:
+                train_vis_folder = pathlib.Path(
+                f"D:\Projects\PCA_Segmentation_MRRN_training\MRRN_PCA_Training\\visualisation\mixup\\nki_resampled\\train\{epoch_zero_datetime}")
+                visualize_train_case_slices(image_data=[adc, t2w],
+                                            contour_data=[labels],
+                                            contour_colors=['r'],
+                                            # Assuming red for ground truth and blue for prediction
+                                            contour_labels=['Ground Truth'],
+                                            save_folder=train_vis_folder,
+                                            train_label_slice_index=train_label_slice_num,
+                                            additional_info={
+                                          'Epoch': epoch,
+                                          'Input Data': str(train_loader.dataset.data[train_step - 1])
+                                      },
+                                            case_id=None  # Or provide a specific case ID if available
+                                            )
 
 
         if (epoch % opt.display_freq) == 0:
@@ -649,23 +720,23 @@ def train():
                     val_dice_2D_temp,seg_temp = get_case_dice_2D_temp(from_engine(["pred"])(val_data),label_val,smooth)
 
                     val_dices.append(val_dice_2D_temp)
-                    if(epoch%(opt.display_freq*20))==0:
+                    if(epoch%(num_epochs//2))==0:
                         # visualize for inspection
                         val_vis_folder = pathlib.Path(
-                            r"D:\Projects\PCA_Segmentation_MRRN_training\MRRN_PCA_Training\visualisation\mixup\nki_resampled\val")
-                        visualize_case_slices(image_data=[adc, t2w],
-                                              contour_data=[label_val, seg_temp],
-                                              contour_colors=['r', 'b'],
-                                              # Assuming red for ground truth and blue for prediction
-                                              contour_labels=['Ground Truth', 'Prediction'],
-                                              save_folder=val_vis_folder,
-                                              additional_info={
+                            f"D:\Projects\PCA_Segmentation_MRRN_training\MRRN_PCA_Training\\visualisation\mixup\\nki_resampled\\val\{epoch_zero_datetime}")
+                        visualize_val_case_slices(image_data=[adc, t2w],
+                                                    contour_data=[label_val, seg_temp],
+                                                    contour_colors=['r', 'b'],
+                                                    # Assuming red for ground truth and blue for prediction
+                                                    contour_labels=['Ground Truth', 'Prediction'],
+                                                    save_folder=val_vis_folder,
+                                                    additional_info={
                                                   'Dice': val_dice_2D_temp,
                                                   'Epoch': epoch,
                                                   'Input Data': str(val_loader.dataset.data[val_step - 1])
                                               },
-                                              case_id=None  # Or provide a specific case ID if available
-                                              )
+                                                    case_id=None  # Or provide a specific case ID if available
+                                                    )
 
 
 
@@ -691,61 +762,62 @@ def train():
                 if val_avg_dice_2D>best_dice:
                     print ('saving for Dice, %.2f' % val_avg_dice_2D, ' > %.2f' % best_dice)
                     im_iter=0
-                        # for vol_data in val_loader:
-                #             im_iter += 1
-                #             adc, label_val,t2w = vol_data["img"].to(device), vol_data["seg"].to(device), vol_data["t2w"].to(device)
-                #
-                #             img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
-                #             print(img_name)
-                #
-                #             label_val_vol=label_val
-                #             if torch.sum(label_val)>0:
-                            # adc=scale_ADC(adc)
-                            #
-                            # val_inputs=torch.cat((adc,t2w),dim=1)
-                            #
-                            #
-                            # with autocast(enabled=True):
-                            #     pass model segmentor and region info
-                            #     input, roi size, sw batch size, model, overlap (0.5)
-                                # vol_data["pred"] = sliding_window_inference(val_inputs,
-                                #                                             (128, 128, 5),
-                                #                                             1,
-                                #                                             model.netSeg_A,
-                                #                                             overlap=0.66,
-                                #                                             mode="gaussian",
-                                #                                             sigma_scale=[0.128, 0.128,0.01])
+                    sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % im_iter)
+                    sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % im_iter)
+                    sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % im_iter)
+                    sitk.WriteImage(sitk.GetImageFromArray(seg_temp.cpu()), 'val%i_seg.nii.gz' % im_iter)
+                    # for vol_data in val_loader:
+                    #     im_iter += 1
+                    #     adc, label_val,t2w = vol_data["img"].to(device), vol_data["seg"].to(device), vol_data["t2w"].to(device)
+
+                        # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+                        # print(img_name)
+
+                        # label_val_vol=label_val
+                        # if torch.sum(label_val)>0:
+                        # adc=scale_ADC(adc)
+
+                        # val_inputs=torch.cat((adc,t2w),dim=1)
+
+
+                        # with autocast(enabled=True):
+                            # pass model segmentor and region info
+                            # input, roi size, sw batch size, model, overlap (0.5)
+                            # vol_data["pred"] = sliding_window_inference(val_inputs,
+                            #                                             (128, 128, 5),
+                            #                                             1,
+                            #                                             model.netSeg_A,
+                            #                                             overlap=0.66,
+                            #                                             mode="gaussian",
+                            #                                             sigma_scale=[0.128, 0.128,0.01])
 
 
 
-                            # seg = from_engine(["pred"])(vol_data)
-                            #print("seg length: ", len(seg))
-                            # seg = seg[0]
-                            #print("seg shape: ", np.shape(seg))
-                            # seg = np.array(seg)
-                            # seg=np.squeeze(seg)
-                            # seg[seg >= 0.5]=1.0
-                            # seg[seg < 0.5]=0.0
-
-                            # sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), 'val%i_t2w.nii.gz' % im_iter)
-                            # sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()), 'val%i_adc.nii.gz' % im_iter)
-                            # sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()), 'val%i_gtv.nii.gz' % im_iter)
-                            # sitk.WriteImage(sitk.GetImageFromArray(seg), 'val%i_seg.nii.gz' % im_iter)
-                            #
-                            # vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
-                            # seg_out= from_engine(["pred"])(vol_data)[0]
-                            # seg_out = np.array(seg_out)
-                            # seg_out=np.squeeze(seg_out)
-                            # seg_out[seg_out >= 0.5]=1.0
-                            # seg_out[seg_out < 0.5]=0.0
-                            # seg_out = np.transpose(seg_out, (2, 1, 0))
+                        # seg = from_engine(["pred"])(vol_data)
+                        #print("seg length: ", len(seg))
+                        # seg = seg[0]
+                        #print("seg shape: ", np.shape(seg))
+                        # seg = np.array(seg)
+                        # seg=np.squeeze(seg)
+                        # seg[seg >= 0.5]=1.0
+                        # seg[seg < 0.5]=0.0
 
 
-                            # cur_rd_path=os.path.join(valpath,img_name)
-                            # im_obj = sitk.ReadImage(cur_rd_path)
-                            # seg_out = sitk.GetImageFromArray(seg_out)
-                            # seg_out = copy_info(im_obj, seg_out)
-                            # sitk.WriteImage(seg_out, 'seg_%s' % img_name)
+
+                        # vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
+                        # seg_out= from_engine(["pred"])(vol_data)[0]
+                        # seg_out = np.array(seg_out)
+                        # seg_out=np.squeeze(seg_out)
+                        # seg_out[seg_out >= 0.5]=1.0
+                        # seg_out[seg_out < 0.5]=0.0
+                        # seg_out = np.transpose(seg_out, (2, 1, 0))
+
+
+                        # cur_rd_path=os.path.join(valpath,img_name)
+                        # im_obj = sitk.ReadImage(cur_rd_path)
+                        # seg_out = sitk.GetImageFromArray(seg_out)
+                        # seg_out = copy_info(im_obj, seg_out)
+                        # sitk.WriteImage(seg_out, 'seg_%s' % img_name)
 
 
                     model.save('AVG_best_finetuned')
