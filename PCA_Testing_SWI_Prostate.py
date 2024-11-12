@@ -24,6 +24,7 @@ assumes nifti files with units 1e-3 mm^2/s
 import torch as t
 from torch.cuda.amp import GradScaler, autocast
 import numpy as np
+from scipy import ndimage
 # from PIL import Image
 # import torchvision.transforms as transforms
 
@@ -43,7 +44,7 @@ opt.isTrain=False
 
 # from pathlib import Path
 from glob import glob
-
+from util import HD
 from typing import Tuple
 import monai
 from monai.handlers.utils import from_engine
@@ -87,7 +88,7 @@ from monai.transforms import (
 
 from scipy.ndimage.measurements import label
 
-def lesion_eval(seg,gtv):
+def lesion_eval(seg,gtv,spacing_mm):
   #filter out small unconnected segs
     structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
     seg=np.squeeze(seg)
@@ -137,11 +138,21 @@ def lesion_eval(seg,gtv):
                      
     inter=np.sum(2*final_pred * labeled_gtv)
     union=inter+abs(np.sum(final_pred-labeled_gtv))
-            
-    return  inter/union, FD           
+    
+    
+    sd=HD.compute_surface_distances(final_pred.astype(bool), labeled_gtv.astype(bool), spacing_mm)
+    hd95=HD.compute_robust_hausdorff(sd,95)
+    DSC=inter/union 
+    
+    if hd95==float('Inf'):
+        hd95=float('NaN')
+        
+    if DSC==0:
+        DSC=float('NaN')   
+       
+    return  DSC, FD, hd95         
         # if np.sum(labeled_seg==ilabel)<27:
-        #     seg[labeled_seg==ilabel]=0
-
+        #     seg[labeled_seg==ilabel]=
 
 
 def copy_info(src, dst):
@@ -228,6 +239,22 @@ print('loading %s' %model_path)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.load_MR_seg_A(model_path) #use weights
+
+
+#Prep model for eval
+for m in model.netSeg_A.modules():
+    for child in m.children():
+        if type(child) == torch.nn.BatchNorm2d:
+            child.track_running_stats = False
+            child.running_mean = None
+            child.running_var = None
+
+
+
+
+
+
+
 #model.to(device)
 
 #freeze all layers
@@ -252,7 +279,10 @@ wt_path= os.path.join(root_dir,opt.name,'seg_test_DSC.csv')
 if not os.path.exists(dest_path):
     os.makedirs(dest_path)
 fd_results = open(wt_path, 'w')
-fd_results.write('Lesion DSC, volumetric DSC,\n')
+fd_results.write('Filename, Lesion DSC, whole volume DSC, hd95 (mm) \n')
+#fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
+    
+
 
 # results_path=os.path.join(root_dir,opt.name,'val_results')
 # if not os.path.exists(results_path):
@@ -344,26 +374,26 @@ if not os.path.exists(seg_path):
 
 
 
-types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz') # the tuple of file types
+types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz', 'MSK_SBRT_*BL_ADC.nii') # the tuple of file types
 val_images=[]
 for fname in types:
    val_images.extend(glob(os.path.join(valpath, fname)))
 val_images = sorted(val_images)
 
-types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz') # the tuple of file types
+types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz', 'MSK_SBRT_*BL_mask.nii') # the tuple of file types
 val_segs=[]
 for fname in types:
    val_segs.extend(glob(os.path.join(valpath, fname)))
 val_segs = sorted(val_segs)
  
 
-types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz') # the tuple of file types
+types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii') # the tuple of file types
 val_images_t2w=[]
 for fname in types:
    val_images_t2w.extend(glob(os.path.join(valpath, fname)))
 val_images_t2w = sorted(val_images_t2w)
 
-types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz') # the tuple of file types
+types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz', 'MSK_SBRT_*BL_CTV.nii*') # the tuple of file types
 val_prost=[]
 for fname in types:
     val_prost.extend(glob(os.path.join(valpath, fname)))
@@ -382,118 +412,8 @@ print(val_images_t2w)
 print(val_prost)
 
 
-#can add additional modalities with thier keyname
-#images_ktrans = sorted(glob(os.path.join(root_dir, "ktrans*.nii.gz")))
-
-
-# n_val=3
-# n_train=7
-#train_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(images, segs, images_t2w)] #first n_train to training
-#val_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(val_images, val_segs, val_images_t2w)] #last  n_val to validation
 val_files = [{"img": img, "seg": seg, "t2w": t2w, "prost": prost} for img, seg, t2w, prost in zip(val_images, val_segs, val_images_t2w, val_prost)] #last  n_val to validation
 
-
-
-
-
-# print(train_files)
-# print(val_files)
-
-# train_transforms = Compose(
-#     [
-#             LoadImaged(keys=["img", "t2w", "seg"]),
-#             EnsureChannelFirstd(keys=["img", "t2w", "seg"]),
-#             Orientationd(keys=["img", "t2w", "seg"], axcodes="RAS"),
-
-#             # ResampleToMatchd(keys=["img"],
-#             #                  key_dst="t2w",
-#             #                  mode="bilinear"),
-#             # ResampleToMatchd(keys=["seg"],
-#             #                  key_dst="t2w",
-#             #                  mode="nearest"),
-#             ResampleToMatchd(keys=["img","seg"],
-#                              key_dst="t2w",
-#                              mode=("bilinear", "nearest")),
-#             Spacingd(keys=["img", "t2w", "seg"],
-#                      pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-#                      mode=("bilinear", "bilinear", "nearest")),
-#             #CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[200, 200, -1]),
-            
-            
-
-#             # ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-#             RandAdjustContrastd(keys=["img"], prob=0.15),
-#             RandHistogramShiftd(keys=["img"], prob=0.15),
-#             RandBiasFieldd(keys=["img"], prob=0.15),
-#             RandAdjustContrastd(keys=["t2w"], prob=0.15),
-#             RandHistogramShiftd(keys=["t2w"], prob=0.15),
-#             RandBiasFieldd(keys=["t2w"], prob=0.15),
-            
-#             RandGaussianNoised(keys=["img", "t2w"], prob=0.15),
-#             RandGaussianSmoothd(keys=["img", "t2w"], prob=0.15),
-#             #RandSimulateLowResolutiond(keys=["img", "t2w"], prob=0.15),
-            
-#             ScaleIntensityRangePercentilesd(keys=["img", "t2w"], lower=0, upper=99, b_min=-1.0, b_max=1.0, clip=True),
-#             # RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
-            
-#             CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
-           
-#             # ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
-#             # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[0, 1]),
-#             # RandRotate90d(keys=["img","t2w","seg"], prob=0.2, spatial_axes=[1, 2]),
-            
-#             # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
-
-#             # CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[-1,-1,opt.extra_neg_slices+(opt.nslices-1)/2]),
-            
-#             CropForegroundd(keys=["img", "t2w", "seg"], source_key="seg", margin=[96, 96, opt.extra_neg_slices + (opt.nslices - 1) / 2]),
-            
-
-#             RandFlipd(keys=["img", "t2w", "seg"], prob=0.5),
-#             RandAxisFlipd(keys=["img", "t2w", "seg"], prob=0.25),
-            
-#             RandRotated(keys=["img", "t2w", "seg"], prob=1.0, range_x=1.0, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
-#             # RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.1, range_y=0.0, range_z=0.0, mode=("bilinear", "bilinear", "nearest")),
-#             # RandRotated(keys=["img", "t2w", "seg"], prob=0.1, range_x=0.0, range_y=0.0, range_z=0.1, mode=("bilinear", "bilinear", "nearest")),
-            
-
-            
-           
-#             RandSpatialCropd(keys=["img", "t2w", "seg"], roi_size=(128, 128, opt.nslices), random_size=False,random_center =True),
-#             Transposed(keys=["img", "seg", "t2w"], indices=[3, 2, 1, 0]),
-#             SqueezeDimd(keys=["img", "t2w", "seg"], dim=-1),
-#             EnsureTyped(keys=["img", "t2w", "seg"]),
-
-#     ]
-# )
-
-# # val_transforms = Compose(
-#     [
-#         LoadImaged(keys=["img","t2w","seg"]),
-#         EnsureChannelFirstd(keys=["img","t2w", "seg"]),
-#         Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),     
-        
-#         ResampleToMatchd(keys=["img","seg"],
-#                              key_dst="t2w",
-#                              mode=("bilinear", "nearest")),
-#         Spacingd(keys=["img", "t2w", "seg"],
-#                      pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-#                      mode=("bilinear", "bilinear", "nearest")),
-        
-#         ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
-#         #ScaleIntensityd(keys="t2w",minv=-1.0, maxv=1.0),
-#         #RandCropByPosNegLabeld(["img", 'lbl'], "lbl", spatial_size=(32, 32)),
-#         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[256, 256,-1]),
-#         #ScaleIntensityd(keys="img",minv=-1.0, maxv=1.0),
-#         #RandRotate90d(keys=["img","t2w","seg"], prob=0.5, spatial_axes=[0, 1]),
-#         #RandRotated(keys=["img","t2w","seg"], prob=0.9, range_x=3.0),
-#         #CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[128,128,2]),
-#         #CenterSpatialCropd(keys=["img","t2w","seg"], roi_size=[160, 160,-1]),
-#         CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
-#         #RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
-#         EnsureTyped(keys=["img","t2w", "seg"]),
-#     ]
-# )
 
 val_transforms = Compose(
     [
@@ -513,42 +433,6 @@ val_transforms = Compose(
         EnsureTyped(keys=["img","t2w", "seg","prost"]),
     ]
 )
-# patch_transform = Compose(
-#     [   #RandSpatialCropSamplesd(keys=["img","t2w","seg"],num_samples=10, roi_size=(128, 128, opt.nslices),random_size=False),
-#         RandAdjustContrastd(keys=["img"],prob=0.2),
-#         RandHistogramShiftd(keys=["img"],prob=0.2),
-#         RandBiasFieldd(keys=["img"], prob=0.2),
-#         RandAdjustContrastd(keys=["t2w"],prob=0.2),
-#         RandHistogramShiftd(keys=["t2w"],prob=0.2),
-#         RandBiasFieldd(keys=["t2w"], prob=0.2),
-#         RandGaussianNoised(keys=["img","t2w"], prob=0.1),
-#         RandGaussianSmoothd(keys=["img","t2w"], prob=0.1),
-        
-        
-#         #SqueezeDimd(keys=["img","t2w", "seg"], dim=-1),  # squeeze the last dim
-#         #Resized(keys=["img","t2w", "seg"], spatial_size=[48, 48]),
-#         # to use crop/pad instead of resize:
-#         # ResizeWithPadOrCropd(keys=["img", "seg"], spatial_size=[48, 48], mode="replicate"),
-#     ]
-# )
-
-# num_samples=5    
-# patch_func = monai.transforms.RandSpatialCropSamplesd(
-#     keys=["img","t2w", "seg"],
-#     #roi_size=[128, 128, opt.extra_neg_slices+(opt.nslices-1)/2],  # dynamic spatial_size for the first two dimensions
-#     roi_size=[128, 128],
-#     num_samples=num_samples,
-#     random_size=False,
-# )
-    
-# volume_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
-# patch_ds = PatchDataset(
-#     volume_ds,
-#     transform=patch_transform,
-#     patch_func=patch_func,
-#     samples_per_image=num_samples,
-# )
-
 
 post_transforms = Compose([
         EnsureTyped(keys=["pred","prost","seg"]),
@@ -605,83 +489,11 @@ num_epochs=opt.niter+opt.niter_decay
 epoch_loss_values = []
 best_dice=0
 mixup_ab=opt.mixup_betadist
-# for epoch in range(num_epochs+1):
-#     lr=model.get_curr_lr()
-#     # if epoch==100:
-#     #     model.netSeg_A.out_conv.requires_grad_(True)
-#     # if epoch==round(num_epochs*opt.unfreeze_fraction1):    
-#     #     print('  >>unfreeze layer 2 and RU11')
-#     #     model.netSeg_A.CNN_block2.requires_grad_(True)
-#     #     model.netSeg_A.RU11.requires_grad_(True)
-#     # if epoch==round(num_epochs*opt.unfreeze_fraction2):
-#     #     print('  >>unfreeze layer 3, RU1,RU2,RU3, RU33 and RU22')
-#     #     # model.netSeg_A.CNN_block2.requires_grad_(True)
-#     #     model.netSeg_A.CNN_block3.requires_grad_(True)
-#     #     model.netSeg_A.RU1.requires_grad_(True)
-#     #     model.netSeg_A.RU2.requires_grad_(True)
-#     #     model.netSeg_A.RU3.requires_grad_(True)
-        
-#     #     #last 3 layers (not counting output conv)    
-#     #     model.netSeg_A.RU33.requires_grad_(True)
-#     #     model.netSeg_A.RU22.requires_grad_(True)
-#     #     # model.netSeg_A.RU11.requires_grad_(True)
-#     # if epoch==round(num_epochs*0.9):
-#     #     for param in model.netSeg_A.parameters():
-#     #         param.requires_grad = True
-#     # print("-" * 10)
-#     # print(f"epoch {epoch + 1}/{num_epochs}")
-#     epoch_loss, step = 0, 0
-#     for batch_data in train_loader:
-#         step += 1
-        
-#         # img_name = batch_data['image_meta_dict']['filename_or_obj'][0].split('/')[-1]
-#         # print(img_name)
-        
-#         adc, labels, t2w = batch_data["img"].to(device), batch_data["seg"].to(device), batch_data["t2w"].to(device)
-#         # img_name=t2w.meta['filename_or_obj']
-#         # print(img_name)
-        
-#         #if torch.sum(labels)>0:
-#         # for ibatch in range(0,opt.batchSize+1):
-#         #     adc[ibatch,:]=scale_ADC(adc[ibatch,:])
-        
-#         inputs=torch.cat((adc,t2w),dim=1)
-#         labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
-#         #labels=labels[:,2,:,:]
-        
-        
-#         labels=  torch.clamp(labels,0.001,0.999).float()
-#         inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
-#         # inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
-        
-#         #inputs, labels = mixup(inputs, labels, np.random.beta(0.2, 0.2))
-#          #label smoothing
-        
-#         model.set_input_sep(inputs,labels)
-#         model.optimize_parameters()
-        
-        
-#     if (epoch%opt.display_freq)==0:      
-#     #                     # save_result = total_steps % opt.update_html_freq == 0
-#     #                     # visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
-#                         errors = model.get_current_errors()['Seg_loss']
-                        
-#                         # message = '(epoch: %d) ' %epoch
-#                         # for k, v in errors.items():
-#                         #     message += '%s: %.3f ' % (k, v)
-#                         #     print(message)
 
-#                         #t = (time.time() - iter_start_time) / opt.batchSize
-#                         print (errors)
-#                         #visualizer.print_current_errors(epoch, epoch_iter, errors, t)    
-        
-        
-#     if (epoch%opt.display_freq)==0:
-# print("-" * 10)
-# print(f"epoch {epoch}/{num_epochs}")
 with torch.no_grad(): # no grade calculation 
-    dice_2D=[]
+    dice_3D=[]
     Lesion_Dice=[]
+    hd95_list=[]
     False_positives=[]
     smooth=1
     step=0
@@ -708,6 +520,7 @@ with torch.no_grad(): # no grade calculation
                                                         mode="gaussian",
                                                         sigma_scale=[0.128, 0.128,0.01])
             
+
         val_data = [post_transforms(i) for i in decollate_batch(val_data)]
                         # seg_out= from_engine(["pred"])(vol_data)[0]
                         # seg_out = np.array(seg_out)
@@ -720,6 +533,8 @@ with torch.no_grad(): # no grade calculation
         gtv = from_engine(["seg"])(val_data)[0]
         prostate = from_engine(["prost"])(val_data)[0]
         
+        
+        
         #print("seg length: ", len(seg))
         # prostate=prostate[0]
         # seg = seg[0]
@@ -729,117 +544,132 @@ with torch.no_grad(): # no grade calculation
         gtv = np.array(gtv)
         gtv=np.squeeze(gtv)
         
-        
-        prostate = np.array(prostate)
-        prostate=np.squeeze(prostate)
-        
-        seg = np.array(seg)
-        seg=np.squeeze(seg)
-        #print('seg sum:', np.sum(seg) )
-        #print('seg max:', np.max(seg) )
-        
-        seg[seg >= 0.5]=1.0
-        seg[seg < 0.5]=0.0
-        
-        #print('seg sum2:', np.sum(seg) )
-        seg_filtered= np.array(seg)
-        seg_filtered[prostate < 0.5]=0.0
-        
-        # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
-        structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
-        labeled, ncomponents = label(seg_filtered, structure)    
-        for ilabel in range(0,ncomponents+1):
-            if np.sum(labeled==ilabel+1)<27:
-                seg_filtered[labeled==ilabel]=0
-
-       
-        # print(np.ndim(seg))
-        # print(seg)
-        # print(np.shape(seg))
-        
-        # t2w=t2w[0,:,:,:,2]
-        # adc=adc[0,:,:,:,2]
-        # label_val=label_val[0,:,:,:,2]
-        
-        
-        # transform = transforms.ToPILImage()
-        # t2w = transform(t2w)
-        # adc = transform(adc+1)
-        # label_png = transform(label_val)
-        # t2w.save('t2w.png')
-        # adc.save('adc.png')
-        # label_png.save('label.png')
-        #seg = np.array(seg)
-        #prostate= from_engine(["prost"])(val_data)[0]
-        #prostate = np.array(prostate)
-        #prostate=np.squeeze(prostate)
-        
-        
-        #seg[seg >= 0.5]=1.0
-        #seg[seg < 0.5]=0.0
-        
-        # seg_filtered= np.array(seg)
-        #seg_filtered[prostate < 0.5]=0.0
-
-        
-        
-        seg_temp=np.array(seg_filtered)
-        #gt_temp=np.array(label_val_vol.cpu())
-        
-        gtv=np.squeeze(gtv)
-        
-        # print(np.shape(seg_temp))
-        # print(np.shape(gtv))
-        
-        seg_flt=seg_temp.flatten()
-        gt_flt=gtv.flatten()
-        
-        
-        intersection = np.sum(seg_flt * (gt_flt > 0))
-        dice_2D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
-        print('  Volumetric DSC: %f'  %dice_2D_temp)
-        dice_2D.append(dice_2D_temp)
-        
-        DSC,FP=lesion_eval(seg_filtered,gtv)
-        Lesion_Dice.append(DSC)
-        False_positives.append(FP)
-        print('  Lesion DSC: %f' %DSC)
-        #print('FP: %i' %FP)
-        
-        
-        fd_results.write(str(DSC) +','+ str(dice_2D_temp) + '\n')
-
-        
-        seg = np.transpose(seg, (2, 1, 0))
-        seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
-        prostate = np.transpose(prostate, (2, 1, 0))
-        
-        img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
-        cur_rd_path=os.path.join(valpath,img_name)
-        im_obj = sitk.ReadImage(cur_rd_path)
-        
-        
-        seg = sitk.GetImageFromArray(seg)
-        seg = copy_info(im_obj, seg)
-        sitk.WriteImage(seg,  os.path.join(seg_path,'seg_%s' % img_name))
-        
-        
-        seg_filtered = sitk.GetImageFromArray(seg_filtered)
-        seg_filtered = copy_info(im_obj, seg_filtered)
-        sitk.WriteImage(seg_filtered,  os.path.join(seg_path,'filteredseg_%s' % img_name))
-        
-        
-        prostate = sitk.GetImageFromArray(prostate)
-        prostate = copy_info(im_obj, prostate)
-        sitk.WriteImage(prostate,  os.path.join(seg_path,'prostateseg_%s' % img_name))
+        if np.sum(gtv)>25.0:
+            
+            prostate = np.array(prostate)
+            prostate=np.squeeze(prostate)
+            prostate=ndimage.binary_dilation(prostate).astype(prostate.dtype)
+            if np.sum(prostate*gtv)<(0.9*np.sum(gtv)):
+                prostate[prostate<1.0]=1.0
+                print('prostate mask issue')
+            
+            seg = np.array(seg)
+            seg=np.squeeze(seg)
+            #print('seg sum:', np.sum(seg) )
+            #print('seg max:', np.max(seg) )
+            
+            seg[seg >= 0.5]=1.0
+            seg[seg < 0.5]=0.0
+            
+            #print('seg sum2:', np.sum(seg) )
+            seg_filtered= np.array(seg)
+            
+            
+            seg_filtered[prostate < 0.5]=0.0
+            
+            # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
+            structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
+            labeled, ncomponents = label(seg_filtered, structure)    
+            for ilabel in range(0,ncomponents+1):
+                if np.sum(labeled==ilabel+1)<27:
+                    seg_filtered[labeled==ilabel]=0
+    
+           
+            # print(np.ndim(seg))
+            # print(seg)
+            # print(np.shape(seg))
+            
+            # t2w=t2w[0,:,:,:,2]
+            # adc=adc[0,:,:,:,2]
+            # label_val=label_val[0,:,:,:,2]
+            
+            
+            # transform = transforms.ToPILImage()
+            # t2w = transform(t2w)
+            # adc = transform(adc+1)
+            # label_png = transform(label_val)
+            # t2w.save('t2w.png')
+            # adc.save('adc.png')
+            # label_png.save('label.png')
+            #seg = np.array(seg)
+            #prostate= from_engine(["prost"])(val_data)[0]
+            #prostate = np.array(prostate)
+            #prostate=np.squeeze(prostate)
+            
+            
+            #seg[seg >= 0.5]=1.0
+            #seg[seg < 0.5]=0.0
+            
+            # seg_filtered= np.array(seg)
+            #seg_filtered[prostate < 0.5]=0.0
+            img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+            cur_rd_path=os.path.join(valpath,img_name)
+            im_obj = sitk.ReadImage(cur_rd_path)
+            
+            spacing_mm=im_obj.GetSpacing()
+            
+            seg_temp=np.array(seg_filtered)
+            #gt_temp=np.array(label_val_vol.cpu())
+            
+            gtv=np.squeeze(gtv)
+            
+            # print(np.shape(seg_temp))
+            # print(np.shape(gtv))
+            
+            seg_flt=seg_temp.flatten()
+            gt_flt=gtv.flatten()
+            
+            print(img_name)
+            
+            intersection = np.sum(seg_flt * (gt_flt > 0))
+            dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
+            print('  Volumetric DSC: %f'  %dice_3D_temp)
+            dice_3D.append(dice_3D_temp)
+            
+            DSC,FP,hd95=lesion_eval(seg_filtered,gtv,spacing_mm)
+            Lesion_Dice.append(DSC)
+            hd95_list.append(hd95)
+            False_positives.append(FP)
+            print('  Lesion DSC: %f' %DSC)
+            print('  Lesion HD95: %f mm' %hd95)
+            #print('FP: %i' %FP)
+            
+            
+            fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
+    
+            
+            seg = np.transpose(seg, (2, 1, 0))
+            seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
+            prostate = np.transpose(prostate, (2, 1, 0))
+            
+            # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+            
+            
+            
+            seg = sitk.GetImageFromArray(seg)
+            seg = copy_info(im_obj, seg)
+            sitk.WriteImage(seg,  os.path.join(seg_path,'seg_%s' % img_name))
+            
+            
+            seg_filtered = sitk.GetImageFromArray(seg_filtered)
+            seg_filtered = copy_info(im_obj, seg_filtered)
+            sitk.WriteImage(seg_filtered,  os.path.join(seg_path,'filteredseg_%s' % img_name))
+            
+            
+            prostate = sitk.GetImageFromArray(prostate)
+            prostate = copy_info(im_obj, prostate)
+            sitk.WriteImage(prostate,  os.path.join(seg_path,'prostateseg_%s' % img_name))
         
             #model.save('AVG_best_finetuned')
-    dice_3D=np.average(dice_2D)
-    mean_Lesion_Dice=np.average(Lesion_Dice)
+    dice_3D=np.median(dice_3D)
+    median_Lesion_Dice=np.median(Lesion_Dice)
+    median_hd95=np.median(hd95_list)
     
-    print('Mean volumetric dice: %f' % dice_3D)
-    print('Mean Lesion dice: %f' % mean_Lesion_Dice)
-    
+    print('Median whole volume dice: %f' % dice_3D)
+    print('Median Lesion dice: %f' % median_Lesion_Dice)
+    #print('mean HD95: %f' % mean_hd95)
+    print('median Lesion HD95: %f' % median_hd95)
+     
     # print(Lesion_Dice)
     # print(FP)
     
@@ -862,5 +692,10 @@ with torch.no_grad(): # no grade calculation
     #print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
     fd_results.flush()  
     
+    wt2_path= os.path.join(root_dir,opt.name,'Result_summary.csv')
+    fd_results_sum = open(wt_path, 'w')
+    fd_results_sum.write('name, median Lesion DSC, median whole volume DSC, median lesion hd95 (mm), precision, recall \n')
+    fd_results_sum.write(opt.name + ',' + str(median_Lesion_Dice) +','+ str(dice_3D) + ',' + str(median_hd95) + ',' + str(precision) + ',' + str(recall) +'\n')
+    fd_results_sum.flush()  
     # if lr>0:
     #         model.update_learning_rate()
