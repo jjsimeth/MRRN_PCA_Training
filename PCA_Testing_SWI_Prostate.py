@@ -697,7 +697,7 @@ with torch.no_grad(): # no grade calculation
     #print(recall)
     print('recall: %f' % recall)
     
-    precision=np.sum(np.array(Lesion_Dice)>0.1).astype(float)/float(np.size(Lesion_Dice)+np.sum(FP))
+    precision=np.sum(np.array(Lesion_Dice)>0.1).astype(float)/float(np.size(Lesion_Dice)+np.sum(False_positives))
     
     # print(np.sum(np.float(np.array(Lesion_Dice)>0.1)))
     # print(np.float(np.size(Lesion_Dice)+np.sum(FP)))

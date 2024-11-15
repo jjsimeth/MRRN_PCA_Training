@@ -132,7 +132,7 @@ def lesion_eval(seg,gtv,spacing_mm):
             else:
                 # pred=np.zeros(np.shape(seg)) 
                 # pred[labeled_seg==ilabel+1]=1.0
-                FD+=1.0
+                FD=FD+1.0
                
                 # if np.sum(pred)>25.0:
                 #     FD+=1
@@ -573,6 +573,7 @@ with torch.no_grad(): # no grade calculation
             False_positives.append(FP)
             print('  Lesion DSC: %f' %DSC)
             print('  Lesion HD95: %f mm' %hd95)
+            print('  FP: %i' %FP)
             #print('FP: %i' %FP)
             
             
@@ -622,7 +623,11 @@ with torch.no_grad(): # no grade calculation
     #print(recall)
     print('recall: %f' % recall)
     
-    precision=np.sum(np.array(Lesion_Dice)>0.1).astype(float)/float(np.size(Lesion_Dice)+np.sum(FP))
+    precision=np.sum(np.array(Lesion_Dice)>0.1).astype(float)/float(np.size(Lesion_Dice)+np.sum(False_positives))
+    # print(np.sum(np.array(Lesion_Dice)>0.1).astype(float))
+    # print(np.size(Lesion_Dice))
+    # print(np.sum(FP))
+    # print(float(np.size(Lesion_Dice)+np.sum(FP)))
     
     # print(np.sum(np.float(np.array(Lesion_Dice)>0.1)))
     # print(np.float(np.size(Lesion_Dice)+np.sum(FP)))
