@@ -110,9 +110,8 @@ def lesion_eval(seg,gtv,spacing_mm):
             
             pred[labeled_seg==ilabel+1]=1.0
             target[labeled_gtv==jlabel+1]=1.0
-            inter=np.sum(2*pred * target)
-            union=inter+abs(np.sum(pred-target))
-            DSC_array[ilabel,jlabel]=inter/union
+            
+            DSC_array[ilabel,jlabel]=np.sum(pred[target>0.5])*2.0 / (np.sum(pred) + np.sum(target))
             #print(DSC_array[ilabel,jlabel])
             
     final_pred=np.zeros(np.shape(seg)) 
@@ -136,13 +135,13 @@ def lesion_eval(seg,gtv,spacing_mm):
                 #     print('Too small to count!')
                 #     print(np.sum(pred))
                      
-    inter=np.sum(2*final_pred * labeled_gtv)
-    union=inter+abs(np.sum(final_pred-labeled_gtv))
+    # inter=np.sum(2*final_pred * labeled_gtv)
+    # union=inter+abs(np.sum(final_pred-labeled_gtv))
     
     
     sd=HD.compute_surface_distances(final_pred.astype(bool), labeled_gtv.astype(bool), spacing_mm)
     hd95=HD.compute_robust_hausdorff(sd,95)
-    DSC=inter/union 
+    DSC=np.sum(final_pred[labeled_gtv>0.5])*2.0 / (np.sum(final_pred) + np.sum(labeled_gtv))
     
     if hd95==float('Inf'):
         hd95=float('NaN')
@@ -150,7 +149,7 @@ def lesion_eval(seg,gtv,spacing_mm):
     if DSC==0:
         DSC=float('NaN')   
        
-    return  DSC, FD, hd95         
+    return  DSC, FD, hd95    
         # if np.sum(labeled_seg==ilabel)<27:
         #     seg[labeled_seg==ilabel]=
 
@@ -374,26 +373,26 @@ if not os.path.exists(seg_path):
 
 
 
-types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz', 'MSK_SBRT_*BL_ADC.nii') # the tuple of file types
+types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz', 'MSK_SBRT_*BL_ADC.nii','ADC_*.nii.gz','DA_*_diffusion_*.nii.gz') # the tuple of file types
 val_images=[]
 for fname in types:
    val_images.extend(glob(os.path.join(valpath, fname)))
 val_images = sorted(val_images)
 
-types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz', 'MSK_SBRT_*BL_mask.nii') # the tuple of file types
+types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz', 'MSK_SBRT_*BL_mask.nii','label_*.nii.gz','DA_*GTV_DIL*.nii.gz') # the tuple of file types
 val_segs=[]
 for fname in types:
    val_segs.extend(glob(os.path.join(valpath, fname)))
 val_segs = sorted(val_segs)
  
 
-types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii') # the tuple of file types
+types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii','T2_*.nii.gz','DA_*_image*.nii.gz') # the tuple of file types
 val_images_t2w=[]
 for fname in types:
    val_images_t2w.extend(glob(os.path.join(valpath, fname)))
 val_images_t2w = sorted(val_images_t2w)
 
-types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz', 'MSK_SBRT_*BL_CTV.nii*') # the tuple of file types
+types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz', 'MSK_SBRT_*BL_CTV.nii*','CTV_*.nii.gz','DA_*_CTV_PROST*.nii.gz') # the tuple of file types
 val_prost=[]
 for fname in types:
     val_prost.extend(glob(os.path.join(valpath, fname)))
@@ -414,6 +413,7 @@ print(val_prost)
 
 val_files = [{"img": img, "seg": seg, "t2w": t2w, "prost": prost} for img, seg, t2w, prost in zip(val_images, val_segs, val_images_t2w, val_prost)] #last  n_val to validation
 
+#print(val_files)
 
 val_transforms = Compose(
     [
@@ -501,6 +501,13 @@ with torch.no_grad(): # no grade calculation
         step += 1
         adc, label_val,t2w,prostate = val_data["img"].to(device), val_data["seg"].to(device), val_data["t2w"].to(device), val_data["prost"]
         
+        adc_name=adc.meta['filename_or_obj'][0].split('/')[-1]
+        t2_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+        gtv_name=label_val.meta['filename_or_obj'][0].split('/')[-1]
+        
+        print('  T2: %s ADC: %s GTV: %s' % (t2_name, adc_name, gtv_name))
+
+
 
         label_val_vol=label_val
         #if torch.sum(label_val)>0:
@@ -544,7 +551,7 @@ with torch.no_grad(): # no grade calculation
         gtv = np.array(gtv)
         gtv=np.squeeze(gtv)
         
-        if np.sum(gtv)>25.0:
+        if  np.sum(gtv)>5:
             
             prostate = np.array(prostate)
             prostate=np.squeeze(prostate)
@@ -568,11 +575,11 @@ with torch.no_grad(): # no grade calculation
             seg_filtered[prostate < 0.5]=0.0
             
             # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
-            structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
-            labeled, ncomponents = label(seg_filtered, structure)    
-            for ilabel in range(0,ncomponents+1):
-                if np.sum(labeled==ilabel+1)<27:
-                    seg_filtered[labeled==ilabel]=0
+            # structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
+            # labeled, ncomponents = label(seg_filtered, structure)    
+            # for ilabel in range(0,ncomponents+1):
+            #     if np.sum(labeled==ilabel+1)<27:
+            #         seg_filtered[labeled==ilabel]=0
     
            
             # print(np.ndim(seg))
@@ -619,7 +626,7 @@ with torch.no_grad(): # no grade calculation
             seg_flt=seg_temp.flatten()
             gt_flt=gtv.flatten()
             
-            print(img_name)
+            # print(img_name)
             
             intersection = np.sum(seg_flt * (gt_flt > 0))
             dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
@@ -662,8 +669,8 @@ with torch.no_grad(): # no grade calculation
         
             #model.save('AVG_best_finetuned')
     dice_3D=np.median(dice_3D)
-    median_Lesion_Dice=np.median(Lesion_Dice)
-    median_hd95=np.median(hd95_list)
+    median_Lesion_Dice=np.nanmedian(Lesion_Dice)
+    median_hd95=np.nanmedian(hd95_list)
     
     print('Median whole volume dice: %f' % dice_3D)
     print('Median Lesion dice: %f' % median_Lesion_Dice)

@@ -87,6 +87,7 @@ from monai.transforms import (
 )
 
 from scipy.ndimage.measurements import label
+
 def lesion_eval(seg,gtv,spacing_mm):
   #filter out small unconnected segs
     structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
@@ -148,7 +149,7 @@ def lesion_eval(seg,gtv,spacing_mm):
     if DSC==0:
         DSC=float('NaN')   
        
-    return  DSC, FD, hd95      
+    return  DSC, FD, hd95     
         # if np.sum(labeled_seg==ilabel)<27:
         #     seg[labeled_seg==ilabel]=
 
@@ -224,7 +225,7 @@ seg_paths = []
 #Define input dimensions and resolution for inference model 
 PD_in=np.array([0.6250, 0.6250, 3]) # millimeters
 DIM_in=np.array([128,128,opt.nslices]) # 128x128 5 Slices
-nmodalities=1
+nmodalities=2
 
 root_dir=os.getcwd()
 opt.nchannels=opt.nslices*nmodalities
@@ -289,33 +290,113 @@ seg_path=os.path.join(root_dir,opt.name,'test_segs')
 if not os.path.exists(seg_path):
     os.makedirs(seg_path)    
     
+# model.netSeg_A.out_conv.requires_grad_(True)
+
+#we can unfreeze other layers either right away or on a epoch based schedule
+
+#we likely want to train a little bit just to get the channel adaptation working 
+#then if we have a lot of data unfreeze more layers as below:
+   
+# #first 5 layers
+    
+# model.netSeg_A.CNN_block2.requires_grad_(True)
+# model.netSeg_A.CNN_block3.requires_grad_(True)
+# model.netSeg_A.RU1.requires_grad_(True)
+# model.netSeg_A.RU2.requires_grad_(True)
+# model.netSeg_A.RU3.requires_grad_(True)
+
+# #last 3 layers (not counting output conv)    
+# model.netSeg_A.RU33.requires_grad_(True)
+# model.netSeg_A.RU22.requires_grad_(True)
+# model.netSeg_A.RU11.requires_grad_(True)
+
+
+# directory = os.environ.get("MONAI_DATA_DIRECTORY")
+# if directory is not None:
+#     os.makedirs(directory, exist_ok=True)
+# root_dir = tempfile.mkdtemp() if directory is None else directory
+# print(root_dir)
+
+
+# #get nii and seg data
+# #nmodalities=2
+# # images = sorted(glob(os.path.join(root_dir, "adc*.nii.gz")))
+# images = sorted(glob(os.path.join(impath, "*[_ep2d_diff_*.nii.gz][*ADC_p*.nii]"))) #adc keywords from filename
+# #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
+# segs = sorted(glob(os.path.join(impath, "*[t2_tse_tra*_ROI.nii.gz][T2w_p*.nii]")))
+# # images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
+# images_t2w = sorted(glob(os.path.join(impath, "*[_t2_tse*.nii.gz][GTV_p*.nii]"))) #t2w keywords from filename
 
 
 
-types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz', 'MSK_SBRT_*BL_ADC.nii') # the tuple of file types
+# types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz') # the tuple of file types
+# images=[]
+# for fname in types:
+#    images.extend(glob(os.path.join(impath, fname)))
+# images = sorted(images)
+
+# types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz') # the tuple of file types
+# segs=[]
+# for fname in types:
+#    segs.extend(glob(os.path.join(impath, fname)))
+# segs = sorted(segs)
+   
+# types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz') # the tuple of file types
+# images_t2w=[]
+# for fname in types:
+#    images_t2w.extend(glob(os.path.join(impath, fname)))
+# images_t2w = sorted(images_t2w)
+
+
+
+
+# #val_images = (glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz"))+glob(os.path.join(impath, "*ADC_p*.nii"))) #adc keywords from filename
+
+# #val_images = (glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz"))+glob(os.path.join(impath, "*ADC_p*.nii"))) #adc keywords from filename
+# val_images = glob(os.path.join(valpath, "*_ep2d_diff_*.nii.gz")) #adc keywords from filename
+# val_images.extend(glob(os.path.join(impath, "*ADC_p*.nii")))
+# val_images = sorted(val_images)
+# #segs = sorted(glob(os.path.join(impath, "*_ADC_ROI*.nii.gz")))
+# #val_segs = sorted(glob(os.path.join(valpath, "*t2_tse_tra*_ROI.nii.gz"))+glob(os.path.join(impath, "*T2w_p*.nii")))
+
+# val_segs = glob(os.path.join(valpath, "*t2_tse_tra*_ROI.nii.gz")) #adc keywords from filename
+# val_segs.extend(glob(os.path.join(impath, "*T2w_p*.nii")))
+# val_segs = sorted(val_segs)
+
+
+# # images_t2w = sorted(glob(os.path.join(root_dir, "t2w*.nii.gz")))
+# #val_images_t2w = sorted(glob(os.path.join(valpath, "*_t2_tse*.nii.gz"))+glob(os.path.join(impath, "*GTV_p*.nii"))) #t2w keywords from filename
+# val_images_t2w = glob(os.path.join(valpath, "*_t2_tse*.nii.gz")) #adc keywords from filename
+# val_images_t2w.extend(glob(os.path.join(impath, "*GTV_p*.nii")))
+# val_images_t2w = sorted(val_images_t2w)
+
+
+
+
+types = ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz', 'MSK_SBRT_*BL_ADC.nii','ADC_*.nii.gz','MSK_DILVAR*_ADC.nii.gz') # the tuple of file types
 val_images=[]
 for fname in types:
    val_images.extend(glob(os.path.join(valpath, fname)))
 val_images = sorted(val_images)
 
-types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz', 'MSK_SBRT_*BL_mask.nii') # the tuple of file types
+types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz', 'MSK_SBRT_*BL_mask.nii','label_*.nii.gz','MSK_DILVAR*_T2GTV.nii.gz') # the tuple of file types
 val_segs=[]
 for fname in types:
    val_segs.extend(glob(os.path.join(valpath, fname)))
 val_segs = sorted(val_segs)
  
 
-types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii') # the tuple of file types
+types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii','T2_*.nii.gz','MSK_DILVAR*_T2w.nii.gz') # the tuple of file types
 val_images_t2w=[]
 for fname in types:
    val_images_t2w.extend(glob(os.path.join(valpath, fname)))
 val_images_t2w = sorted(val_images_t2w)
 
-types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz', 'MSK_SBRT_*BL_CTV.nii*') # the tuple of file types
-val_prost=[]
-for fname in types:
-    val_prost.extend(glob(os.path.join(valpath, fname)))
-val_prost = sorted(val_prost)
+# types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz', 'MSK_SBRT_*BL_CTV.nii*','CTV_*_.nii.gz') # the tuple of file types
+# val_prost=[]
+# for fname in types:
+#     val_prost.extend(glob(os.path.join(valpath, fname)))
+# val_prost = sorted(val_prost)
 
 
 
@@ -330,43 +411,41 @@ val_prost = sorted(val_prost)
 # print(val_prost)
 
 
-val_files = [{"img": img, "seg": seg, "prost": prost} for img, seg, prost in zip(val_images, val_segs,val_prost)] #last  n_val to validation
+val_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(val_images, val_segs, val_images_t2w)] #last  n_val to validation
 
 
 val_transforms = Compose(
     [
-        LoadImaged(keys=["img","seg","prost"]),
-        EnsureChannelFirstd(keys=["img", "seg","prost"]),
-        Orientationd(keys=["img","seg"], axcodes="RAS"),     
+        LoadImaged(keys=["img","t2w","seg"]),
+        EnsureChannelFirstd(keys=["img","t2w", "seg"]),
+        Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),     
         
-        ResampleToMatchd(keys=["img","seg","prost"],
-                             key_dst="img",
-                             mode=("bilinear", "nearest", "nearest")),
-        Spacingd(keys=["img", "seg"],
-                     pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                     mode=("bilinear", "nearest")),
+        ResampleToMatchd(keys=["img","seg"],
+                              key_dst="t2w",
+                              mode=("bilinear", "nearest")),
+        Spacingd(keys=["img", "t2w", "seg"],
+                      pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                      mode=("bilinear", "bilinear", "nearest")),
         
-        ScaleIntensityRangePercentilesd(keys=["img"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
-        
-        CropForegroundd(keys=["img","seg","prost"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
-        #RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
-        EnsureTyped(keys=["img", "seg","prost"]),
+        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
+        # CropForegroundd(keys=["img","t2w","seg"], source_key= "prost", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
+        EnsureTyped(keys=["img","t2w", "seg"]),
     ]
 )
 
 post_transforms = Compose([
-        EnsureTyped(keys=["pred","prost","seg"]),
+        EnsureTyped(keys=["pred","seg"]),
         Invertd(
-            keys=["pred","prost","seg"],
+            keys=["pred","seg"],
             transform=val_transforms,
-            orig_keys="img",
-            meta_keys=["pred_meta_dict","pred_meta_dict","pred_meta_dict"],
+            orig_keys="t2w",
+            meta_keys=["pred_meta_dict","pred_meta_dict"],
             orig_meta_keys="image_meta_dict",
             meta_key_postfix="meta_dict",
             nearest_interp=True,
             to_tensor=True,
         ),
-        AsDiscreted(keys=["pred","prost","seg"], argmax=False),
+        AsDiscreted(keys=["pred","seg"], argmax=False),
 
     ])
 
@@ -395,13 +474,13 @@ val_loader = DataLoader(
 )
 
 
-# check_data = monai.utils.misc.first(val_loader)
-# print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
+check_data = monai.utils.misc.first(val_loader)
+print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
 
-# sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_t2w.nii.gz'))
-# sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_adc.nii.gz'))
-# sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_SEG.nii.gz'))
-# sitk.WriteImage(sitk.GetImageFromArray(check_data["prost"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_PROST.nii.gz'))
+sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_t2w.nii.gz'))
+sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_adc.nii.gz'))
+sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_SEG.nii.gz'))
+#sitk.WriteImage(sitk.GetImageFromArray(check_data["prost"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_PROST.nii.gz'))
 
 
 
@@ -419,22 +498,22 @@ with torch.no_grad(): # no grade calculation
     step=0
     for val_data in val_loader:
         step += 1
-        adc, label_val,prostate = val_data["img"].to(device), val_data["seg"].to(device), val_data["prost"]
+        adc, label_val,t2w = val_data["img"].to(device), val_data["seg"].to(device), val_data["t2w"].to(device)
         
+        
+        adc_name=adc.meta['filename_or_obj'][0].split('/')[-1]
+        t2_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+        gtv_name=label_val.meta['filename_or_obj'][0].split('/')[-1]
+        
+        print('  T2: %s ADC: %s GTV: %s' % (t2_name, adc_name, gtv_name))
+        #print('  T2: %s ADC: %s GTV: %s Prostate: %s', %())
 
         label_val_vol=label_val
         #if torch.sum(label_val)>0:
         # adc=scale_ADC(adc)
         
-        val_inputs=adc
+        val_inputs=torch.cat((adc,t2w),dim=1)
        
-        adc_name=adc.meta['filename_or_obj'][0].split('/')[-1]
-        #t2_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
-        gtv_name=label_val.meta['filename_or_obj'][0].split('/')[-1]
-        
-        print('  ADC: %s GTV: %s' % (adc_name, gtv_name))
-       
-        
         
         with autocast(enabled=True):
             #pass model segmentor and region info
@@ -458,10 +537,8 @@ with torch.no_grad(): # no grade calculation
                         
         seg = from_engine(["pred"])(val_data)[0]
         gtv = from_engine(["seg"])(val_data)[0]
-        prostate = from_engine(["prost"])(val_data)[0]
+        #prostate = from_engine(["prost"])(val_data)[0]
         
-        
-    
         
         
         #print("seg length: ", len(seg))
@@ -473,14 +550,21 @@ with torch.no_grad(): # no grade calculation
         gtv = np.array(gtv)
         gtv=np.squeeze(gtv)
         
-        if  np.sum(gtv)>5:
-            
-            prostate = np.array(prostate)
-            prostate=np.squeeze(prostate)
-            prostate=ndimage.binary_dilation(prostate).astype(prostate.dtype)
-            if np.sum(prostate*gtv)<(0.9*np.sum(gtv)):
-                prostate[prostate<1.0]=1.0
-                print('prostate mask issue')
+        img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+        cur_rd_path=os.path.join(valpath,img_name)
+        im_obj = sitk.ReadImage(cur_rd_path)
+        
+        spacing_mm=im_obj.GetSpacing()
+        
+        #filters out less than 1mL
+        #if (np.sum(gtv)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0)<1.0:
+        if  np.sum(gtv)>5:  
+            # prostate = np.array(prostate)
+            # prostate=np.squeeze(prostate)
+            # prostate=ndimage.binary_dilation(prostate).astype(prostate.dtype)
+            # if np.sum(prostate*gtv)<(0.9*np.sum(gtv)):
+            #     prostate[prostate<1.0]=1.0
+            #     print('prostate mask issue')
             
             seg = np.array(seg)
             seg=np.squeeze(seg)
@@ -494,14 +578,14 @@ with torch.no_grad(): # no grade calculation
             seg_filtered= np.array(seg)
             
             
-            seg_filtered[prostate < 0.5]=0.0
+            #seg_filtered[prostate < 0.5]=0.0
             
             # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
-            structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
-            labeled, ncomponents = label(seg_filtered, structure)    
-            for ilabel in range(0,ncomponents+1):
-                if np.sum(labeled==ilabel+1)<27:
-                    seg_filtered[labeled==ilabel]=0
+            # structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
+            # labeled, ncomponents = label(seg_filtered, structure)    
+            # for ilabel in range(0,ncomponents+1):
+            #     if np.sum(labeled==ilabel+1)<27:
+            #         seg_filtered[labeled==ilabel]=0
     
            
             # print(np.ndim(seg))
@@ -531,11 +615,7 @@ with torch.no_grad(): # no grade calculation
             
             # seg_filtered= np.array(seg)
             #seg_filtered[prostate < 0.5]=0.0
-            img_name=adc.meta['filename_or_obj'][0].split('/')[-1]
-            cur_rd_path=os.path.join(valpath,img_name)
-            im_obj = sitk.ReadImage(cur_rd_path)
             
-            spacing_mm=im_obj.GetSpacing()
             
             seg_temp=np.array(seg_filtered)
             #gt_temp=np.array(label_val_vol.cpu())
@@ -567,17 +647,17 @@ with torch.no_grad(): # no grade calculation
             fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
     
             
-            seg = np.transpose(seg, (2, 1, 0))
+            #seg = np.transpose(seg, (2, 1, 0))
             seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
-            prostate = np.transpose(prostate, (2, 1, 0))
+            #prostate = np.transpose(prostate, (2, 1, 0))
             
             # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
             
             
             
-            seg = sitk.GetImageFromArray(seg)
-            seg = copy_info(im_obj, seg)
-            sitk.WriteImage(seg,  os.path.join(seg_path,'seg_%s' % img_name))
+            # seg = sitk.GetImageFromArray(seg)
+            # seg = copy_info(im_obj, seg)
+            # sitk.WriteImage(seg,  os.path.join(seg_path,'seg_%s' % img_name))
             
             
             seg_filtered = sitk.GetImageFromArray(seg_filtered)
@@ -585,9 +665,9 @@ with torch.no_grad(): # no grade calculation
             sitk.WriteImage(seg_filtered,  os.path.join(seg_path,'filteredseg_%s' % img_name))
             
             
-            prostate = sitk.GetImageFromArray(prostate)
-            prostate = copy_info(im_obj, prostate)
-            sitk.WriteImage(prostate,  os.path.join(seg_path,'prostateseg_%s' % img_name))
+            # prostate = sitk.GetImageFromArray(prostate)
+            # prostate = copy_info(im_obj, prostate)
+            # sitk.WriteImage(prostate,  os.path.join(seg_path,'prostateseg_%s' % img_name))
         
             #model.save('AVG_best_finetuned')
     dice_3D=np.median(dice_3D)
