@@ -90,6 +90,9 @@ from scipy.ndimage.measurements import label
 
 def lesion_eval(seg,gtv,spacing_mm):
   #filter out small unconnected segs
+    labeled_gtv=np.squeeze(gtv)
+    labeled_gtv[labeled_gtv>0.0]=1
+    labeled_gtv.astype(int)
     structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
     seg=np.squeeze(seg)
     
@@ -103,15 +106,17 @@ def lesion_eval(seg,gtv,spacing_mm):
     #DSC_list=np.zeros([ncomponents_gtv,1])
     #precision_list=np.zeros([ncomponents_seg,1])
     DSC_array=np.zeros([ncomponents_seg,ncomponents_gtv])
+    #print('n components seg: %i' % ncomponents_seg)
     for ilabel in range(0,ncomponents_seg):
+        #print('n seg: %i' % (ilabel+1))
         for jlabel in range(0,ncomponents_gtv):
             pred=np.zeros(np.shape(seg)) 
             target=np.zeros(np.shape(seg)) 
             
-            pred[labeled_seg==ilabel+1]=1.0
-            target[labeled_gtv==jlabel+1]=1.0
+            pred[labeled_seg==(ilabel+1)]=1.0
+            target[labeled_gtv==(jlabel+1)]=1.0
             
-            DSC_array[ilabel,jlabel]=np.sum(pred[target>0.5])*2.0 / (np.sum(pred) + np.sum(target))
+            DSC_array[ilabel,jlabel]=np.sum(pred*target)*2.0 /(np.sum(pred) + np.sum(target))
             #print(DSC_array[ilabel,jlabel])
             
     final_pred=np.zeros(np.shape(seg)) 
@@ -120,7 +125,10 @@ def lesion_eval(seg,gtv,spacing_mm):
     for ilabel in range(0,ncomponents_seg):
         for jlabel in range(0,ncomponents_gtv):
             if DSC_array[ilabel,jlabel]>=0.1:
+                #print('detection')
+                #print(np.sum((labeled_seg==ilabel+1)*labeled_gtv)*2.0 /(np.sum(labeled_seg==ilabel+1) + np.sum(labeled_gtv)))
                 final_pred[labeled_seg==ilabel+1]=1.0
+                
             else:
                 # pred=np.zeros(np.shape(seg)) 
                 # pred[labeled_seg==ilabel+1]=1.0
@@ -141,7 +149,8 @@ def lesion_eval(seg,gtv,spacing_mm):
     
     sd=HD.compute_surface_distances(final_pred.astype(bool), labeled_gtv.astype(bool), spacing_mm)
     hd95=HD.compute_robust_hausdorff(sd,95)
-    DSC=np.sum(final_pred[labeled_gtv>0.5])*2.0 / (np.sum(final_pred) + np.sum(labeled_gtv))
+    
+    DSC=np.sum(final_pred*labeled_gtv)*2.0 /(np.sum(final_pred) + np.sum(labeled_gtv))
     
     if hd95==float('Inf'):
         hd95=float('NaN')
@@ -149,7 +158,7 @@ def lesion_eval(seg,gtv,spacing_mm):
     if DSC==0:
         DSC=float('NaN')   
        
-    return  DSC, FD, hd95    
+    return  DSC, FD, hd95      
         # if np.sum(labeled_seg==ilabel)<27:
         #     seg[labeled_seg==ilabel]=
 
