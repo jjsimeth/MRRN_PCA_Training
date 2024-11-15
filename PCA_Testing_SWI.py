@@ -422,6 +422,7 @@ val_images_t2w = sorted(val_images_t2w)
 
 val_files = [{"img": img, "seg": seg, "t2w": t2w} for img, seg, t2w in zip(val_images, val_segs, val_images_t2w)] #last  n_val to validation
 
+opt.extra_neg_slices=5
 
 val_transforms = Compose(
     [
@@ -430,17 +431,21 @@ val_transforms = Compose(
         Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),     
         
         ResampleToMatchd(keys=["img","seg"],
-                              key_dst="t2w",
+                              key_dst="img",
                               mode=("bilinear", "nearest")),
         # Spacingd(keys=["img", "t2w", "seg"],
         #               pixdim=(PD_in[0], PD_in[1], PD_in[2]),
         #               mode=("bilinear", "bilinear", "nearest")),
-        Spacingd(keys=["img", "t2w", "seg"],
-                      pixdim=(PD_in[0], PD_in[1]),
-                      mode=("bilinear", "bilinear", "nearest")),
+        #CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[256, 256,-1]),
+        ScaleIntensityRangePercentilesd(keys=["img"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
+        ScaleIntensityRangePercentilesd(keys=["t2w"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
         
-        ScaleIntensityRangePercentilesd(keys=["img","t2w"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
-        # CropForegroundd(keys=["img","t2w","seg"], source_key= "prost", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
+        Spacingd(keys=["img", "t2w", "seg"],
+                      pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+                      mode=("bilinear", "bilinear", "nearest")),
+        #CenterSpatialCropd(keys=["img", "t2w", "seg"], roi_size=[192, 192,28]),
+        
+        CropForegroundd(keys=["img","t2w","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
         EnsureTyped(keys=["img","t2w", "seg"]),
     ]
 )

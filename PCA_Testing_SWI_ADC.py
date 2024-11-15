@@ -328,7 +328,7 @@ val_segs = sorted(val_segs)
 # val_prost = sorted(val_prost)
 
 
-
+opt.extra_neg_slices=5
 
 # print(images)
 # print(segs)
@@ -360,6 +360,7 @@ val_transforms = Compose(
                      mode=("bilinear", "nearest")),
         ScaleIntensityRangePercentilesd(keys=["img"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
         
+        #CenterSpatialCropd(keys=["img", "seg"], roi_size=[192, 192,28]),
         CropForegroundd(keys=["img","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
         #RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
         EnsureTyped(keys=["img", "seg"]),
