@@ -151,16 +151,19 @@ def lesion_eval(seg,gtv,spacing_mm):
     hd95=HD.compute_robust_hausdorff(sd,95)
     
     DSC=np.sum(final_pred*labeled_gtv)*2.0 /(np.sum(final_pred) + np.sum(labeled_gtv))
+    gt_vol=np.sum(labeled_gtv).astype(float)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0 #cm^3 #Nvoxels*(voxel dims in mm)*(10^-3 to get to cm^3)
+    pred_vol=np.sum(final_pred).astype(float)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0
     
     if hd95==float('Inf'):
         hd95=float('NaN')
         
     if DSC==0:
-        DSC=float('NaN')   
+        DSC=float('NaN')  
+    
+    if pred_vol==0:
+        pred_vol=float('NaN')  
        
-    return  DSC, FD, hd95      
-        # if np.sum(labeled_seg==ilabel)<27:
-        #     seg[labeled_seg==ilabel]=
+    return  DSC, FD, hd95, gt_vol, pred_vol    
 
 
 def copy_info(src, dst):
@@ -287,7 +290,7 @@ wt_path= os.path.join(root_dir,opt.name,'seg_test_DSC.csv')
 if not os.path.exists(dest_path):
     os.makedirs(dest_path)
 fd_results = open(wt_path, 'w')
-fd_results.write('Filename, Lesion DSC, whole volume DSC, hd95 (mm) \n')
+fd_results.write('Filename, Lesion DSC, whole volume DSC, hd95 (mm), gt vol (mL), pred vol(mL) \n')
 #fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
     
 
@@ -639,19 +642,20 @@ with torch.no_grad(): # no grade calculation
             
             intersection = np.sum(seg_flt * (gt_flt > 0))
             dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
-            print('  Volumetric DSC: %f'  %dice_3D_temp)
             dice_3D.append(dice_3D_temp)
             
-            DSC,FP,hd95=lesion_eval(seg_filtered,gtv,spacing_mm)
+            DSC,FP,hd95, gt_vol, pred_vol=lesion_eval(seg_filtered,gtv,spacing_mm)
             Lesion_Dice.append(DSC)
             hd95_list.append(hd95)
             False_positives.append(FP)
-            print('  Lesion DSC: %f' %DSC)
-            print('  Lesion HD95: %f mm' %hd95)
+            print('  Lesion DSC: %f, Lesion HD95: %f mm, Volumetric DSC: %f' %(DSC, hd95, dice_3D_temp))
+            print('  Lesion vol: %f mL, prediction vol: %f mL' %(gt_vol,pred_vol))
+            
+        
             #print('FP: %i' %FP)
             
             
-            fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
+            fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) + ',' + str(gt_vol) + ',' + str(pred_vol) +'\n' )
     
             
             seg = np.transpose(seg, (2, 1, 0))
