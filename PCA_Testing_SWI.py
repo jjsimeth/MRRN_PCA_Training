@@ -436,7 +436,7 @@ val_transforms = Compose(
         Orientationd(keys=["img","t2w","seg"], axcodes="RAS"),     
         
         ResampleToMatchd(keys=["img","seg"],
-                              key_dst="img",
+                              key_dst="t2w",
                               mode=("bilinear", "nearest")),
         # Spacingd(keys=["img", "t2w", "seg"],
         #               pixdim=(PD_in[0], PD_in[1], PD_in[2]),
@@ -668,7 +668,8 @@ with torch.no_grad(): # no grade calculation
             
             #seg = np.transpose(seg, (2, 1, 0))
             seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
-            final_pred = np.transpose(seg_filtered, (2, 1, 0))
+            final_pred = np.transpose(final_pred, (2, 1, 0))
+            gtv = np.transpose(gtv, (2, 1, 0))
             #prostate = np.transpose(prostate, (2, 1, 0))
             
             # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
@@ -678,7 +679,9 @@ with torch.no_grad(): # no grade calculation
             # seg = sitk.GetImageFromArray(seg)
             # seg = copy_info(im_obj, seg)
             # sitk.WriteImage(seg,  os.path.join(seg_path,'seg_%s' % img_name))
-            
+            gtv = sitk.GetImageFromArray(gtv)
+            gtv = copy_info(im_obj, gtv)
+            sitk.WriteImage(gtv,  os.path.join(seg_path,'gtv_%s' % img_name))
             
             seg_filtered = sitk.GetImageFromArray(seg_filtered)
             seg_filtered = copy_info(im_obj, seg_filtered)
