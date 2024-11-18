@@ -163,7 +163,7 @@ def lesion_eval(seg,gtv,spacing_mm):
     if pred_vol==0:
         pred_vol=float('NaN')  
        
-    return  DSC, FD, hd95, gt_vol, pred_vol    
+    return  DSC, FD, hd95, gt_vol, pred_vol, final_pred 
         # if np.sum(labeled_seg==ilabel)<27:
         #     seg[labeled_seg==ilabel]=
 
@@ -320,11 +320,11 @@ for fname in types:
 val_segs = sorted(val_segs)
  
 
-# types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii') # the tuple of file types
-# val_images_t2w=[]
-# for fname in types:
-#    val_images_t2w.extend(glob(os.path.join(valpath, fname)))
-# val_images_t2w = sorted(val_images_t2w)
+types = ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', 'MSK_SBRT_*BL_T2.nii','MSK_DILVAR*_T2.nii.gz') # the tuple of file types
+val_images_t2w=[]
+for fname in types:
+    val_images_t2w.extend(glob(os.path.join(valpath, fname)))
+val_images_t2w = sorted(val_images_t2w)
 
 # types = ('ProstateX-????.nii.gz', 'MSK_MR_*_CTV.nii.gz', 'MSK_SBRT_*BL_CTV.nii*') # the tuple of file types
 # val_prost=[]
@@ -354,9 +354,9 @@ val_transforms = Compose(
         EnsureChannelFirstd(keys=["img", "seg"]),
         Orientationd(keys=["img","seg"], axcodes="RAS"),     
         
-        ResampleToMatchd(keys=["img","seg"],
+        ResampleToMatchd(keys=["seg"],
                              key_dst="img",
-                             mode=("bilinear", "nearest")),
+                             mode=("nearest")),
         # Spacingd(keys=["img", "seg"],
         #              pixdim=(PD_in[0], PD_in[1], PD_in[2]),
         #              mode=("bilinear", "nearest")),
@@ -489,6 +489,11 @@ with torch.no_grad(): # no grade calculation
         #print("seg shape: ", np.shape(seg))
         gtv = np.array(gtv)
         gtv=np.squeeze(gtv)
+        seg = np.array(seg)
+        seg=np.squeeze(seg)
+        seg[seg >= 0.5]=1.0
+        seg[seg < 0.5]=0.0
+        seg_filtered= np.array(seg)   
         
         #if np.sum(gtv)>25.0:
         if  np.sum(gtv)>5: 
@@ -500,16 +505,14 @@ with torch.no_grad(): # no grade calculation
             #     prostate[prostate<1.0]=1.0
             #     print('prostate mask issue')
             
-            seg = np.array(seg)
-            seg=np.squeeze(seg)
+            
             #print('seg sum:', np.sum(seg) )
             #print('seg max:', np.max(seg) )
             
-            seg[seg >= 0.5]=1.0
-            seg[seg < 0.5]=0.0
+            
             
             #print('seg sum2:', np.sum(seg) )
-            seg_filtered= np.array(seg)
+            
             
             
             #seg_filtered[prostate < 0.5]=0.0
@@ -572,7 +575,7 @@ with torch.no_grad(): # no grade calculation
             dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
             dice_3D.append(dice_3D_temp)
             
-            DSC,FP,hd95, gt_vol, pred_vol=lesion_eval(seg_filtered,gtv,spacing_mm)
+            DSC,FP,hd95, gt_vol, pred_vol,final_pred=lesion_eval(seg_filtered,gtv,spacing_mm)
             Lesion_Dice.append(DSC)
             hd95_list.append(hd95)
             False_positives.append(FP)
@@ -585,8 +588,9 @@ with torch.no_grad(): # no grade calculation
     
     
             
-            #seg = np.transpose(seg, (2, 1, 0))
+            final_pred = np.transpose(final_pred, (2, 1, 0))
             seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
+            gtv = np.transpose(gtv, (2, 1, 0))
             #prostate = np.transpose(prostate, (2, 1, 0))
             
             # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
@@ -601,6 +605,15 @@ with torch.no_grad(): # no grade calculation
             seg_filtered = sitk.GetImageFromArray(seg_filtered)
             seg_filtered = copy_info(im_obj, seg_filtered)
             sitk.WriteImage(seg_filtered,  os.path.join(seg_path,'filteredseg_%s' % img_name))
+            
+            gtv = sitk.GetImageFromArray(gtv)
+            gtv = copy_info(im_obj, gtv)
+            sitk.WriteImage(gtv,  os.path.join(seg_path,'gtv_%s' % img_name))
+            
+            final_pred = sitk.GetImageFromArray(final_pred)
+            final_pred = copy_info(im_obj, final_pred)
+            sitk.WriteImage(final_pred,  os.path.join(seg_path,'final_pred_%s' % img_name))
+            
             
             
             # prostate = sitk.GetImageFromArray(prostate)

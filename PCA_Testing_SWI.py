@@ -163,7 +163,7 @@ def lesion_eval(seg,gtv,spacing_mm):
     if pred_vol==0:
         pred_vol=float('NaN')  
        
-    return  DSC, FD, hd95, gt_vol, pred_vol     
+    return  DSC, FD, hd95, gt_vol, pred_vol  ,final_pred   
         # if np.sum(labeled_seg==ilabel)<27:
         #     seg[labeled_seg==ilabel]=
 
@@ -656,7 +656,7 @@ with torch.no_grad(): # no grade calculation
             dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
             dice_3D.append(dice_3D_temp)
             
-            DSC,FP,hd95, gt_vol, pred_vol=lesion_eval(seg_filtered,gtv,spacing_mm)
+            DSC,FP,hd95, gt_vol, pred_vol, final_pred=lesion_eval(seg_filtered,gtv,spacing_mm)
             Lesion_Dice.append(DSC)
             hd95_list.append(hd95)
             False_positives.append(FP)
@@ -668,6 +668,7 @@ with torch.no_grad(): # no grade calculation
             
             #seg = np.transpose(seg, (2, 1, 0))
             seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
+            final_pred = np.transpose(seg_filtered, (2, 1, 0))
             #prostate = np.transpose(prostate, (2, 1, 0))
             
             # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
@@ -682,6 +683,10 @@ with torch.no_grad(): # no grade calculation
             seg_filtered = sitk.GetImageFromArray(seg_filtered)
             seg_filtered = copy_info(im_obj, seg_filtered)
             sitk.WriteImage(seg_filtered,  os.path.join(seg_path,'filteredseg_%s' % img_name))
+            
+            final_pred = sitk.GetImageFromArray(final_pred)
+            final_pred = copy_info(im_obj, final_pred)
+            sitk.WriteImage(final_pred,  os.path.join(seg_path,'final_pred_%s' % img_name))
             
             
             # prostate = sitk.GetImageFromArray(prostate)
