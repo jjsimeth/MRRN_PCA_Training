@@ -352,14 +352,14 @@ val_transforms = Compose(
     [
         LoadImaged(keys=["img","seg","prost"]),
         EnsureChannelFirstd(keys=["img", "seg","prost"]),
-        Orientationd(keys=["img","seg"], axcodes="RAS"),     
+        Orientationd(keys=["img","seg","prost"], axcodes="RAS"),     
         
         ResampleToMatchd(keys=["img","seg","prost"],
                              key_dst="img",
                              mode=("bilinear", "nearest", "nearest")),
-        Spacingd(keys=["img", "seg"],
+        Spacingd(keys=["img", "seg","prost"],
                      pixdim=(PD_in[0], PD_in[1], PD_in[2]),
-                     mode=("bilinear", "nearest")),
+                     mode=("bilinear", "nearest", "nearest")),
         
         ScaleIntensityRangePercentilesd(keys=["img"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
         
