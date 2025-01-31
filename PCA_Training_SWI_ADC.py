@@ -359,13 +359,13 @@ post_transforms = Compose([
 
 
 # 3D dataset with preprocessing transforms
+print(f'Loading training data from path: {impath}')
 train_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
 #train_ds = monai.data.ShuffleBuffer(patch_ds, seed=0) #patch based trainer
 
 
-
+print(f'Loading validation data from path: {valpath}')
 val_ds = monai.data.CacheDataset(data=val_files, transform=val_transforms)
-
 
 train_loader = DataLoader(
     train_ds,
@@ -374,6 +374,7 @@ train_loader = DataLoader(
     pin_memory=torch.cuda.is_available(),
     drop_last=True
 )
+
 val_loader = DataLoader(
     val_ds,
     batch_size=1,
@@ -545,14 +546,15 @@ for epoch in range(num_epochs+1):
                 
                 
             dice_2D=np.average(dice_2D)
-            print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
+            print('epoch %i' % epoch, 'DSC  %.3f' % dice_2D, ' (best: %.3f)'  % best_dice)
             
             fd_results.write(str(dice_2D) + '\n')
             fd_results.flush()  
             
                     
             if dice_2D>best_dice:
-                    print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
+                    print ('saving new model with average dice, %.3f' % dice_2D, ' > last best model average dice %.3f' % best_dice)
+                    # print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice)
                     model.save('AVG_best_finetuned')
                     best_dice = dice_2D
                     im_iter=0
@@ -561,8 +563,7 @@ for epoch in range(num_epochs+1):
                         adc, label_val = vol_data["img"].to(device), vol_data["seg"].to(device)
                         
                         img_name=adc.meta['filename_or_obj'][0].split('/')[-1]
-                        print(img_name)
-                        
+
                         label_val_vol=label_val
                         #if torch.sum(label_val)>0:
                         # adc=scale_ADC(adc)
@@ -591,10 +592,16 @@ for epoch in range(num_epochs+1):
                         seg=np.squeeze(seg)
                         seg[seg >= 0.5]=1.0
                         seg[seg < 0.5]=0.0
-                    
+
+                        if im_iter == 1:
+                            print('saving predictions of model for validation data at the following paths:')
+
                         #sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), os.path.join(results_path,'val%i_t2w.nii.gz' % im_iter))
+                        print(os.path.join(results_path,'val%i_adc.nii.gz' % im_iter))
                         sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()),  os.path.join(results_path,'val%i_adc.nii.gz' % im_iter))
+                        print(os.path.join(results_path,'val%i_gtv.nii.gz' % im_iter))
                         sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()),  os.path.join(results_path,'val%i_gtv.nii.gz' % im_iter))
+                        print(os.path.join(results_path,'val%i_seg.nii.gz' % im_iter))
                         sitk.WriteImage(sitk.GetImageFromArray(seg),  os.path.join(results_path,'val%i_seg.nii.gz' % im_iter))
                         
                         vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
@@ -610,7 +617,7 @@ for epoch in range(num_epochs+1):
                         im_obj = sitk.ReadImage(cur_rd_path)
                         seg_out = sitk.GetImageFromArray(seg_out)
                         seg_out = copy_info(im_obj, seg_out)
-                        sitk.WriteImage(seg_out,  os.path.join(seg_path,'seg_%s' % img_name))
+                        # sitk.WriteImage(seg_out,  os.path.join(seg_path,'seg_%s' % img_name))
 
 
 
