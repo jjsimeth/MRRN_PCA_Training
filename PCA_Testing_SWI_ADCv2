@@ -1,0 +1,898 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Oct 27 13:41:09 2023
+
+@author: SimethJ
+"""
+
+
+
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Oct 25 11:45:59 2023
+
+@author: SimethJ
+
+Updated inference function that will process all the nifti files in a specified
+folder (default: )
+
+assumes nifti files with units 1e-3 mm^2/s
+
+"""
+
+#import nibabel as nib
+import torch as t
+from torch.cuda.amp import GradScaler, autocast
+import numpy as np
+from scipy import ndimage
+# from PIL import Image
+# import torchvision.transforms as transforms
+
+#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+import os
+import SimpleITK as sitk
+import torch.multiprocessing
+
+import torch.utils.data
+from options.train_options import TrainOptions
+from models.models import create_model
+# from util import util
+from PCA_DIL_inference_utils import sliding_window_inference 
+
+opt = TrainOptions().parse()
+opt.isTrain=False
+
+# from pathlib import Path
+from glob import glob
+from util import HD
+from typing import Tuple
+import monai
+from monai.handlers.utils import from_engine
+from monai.data import DataLoader, create_test_image_3d,PatchDataset
+from monai.data import decollate_batch
+
+
+#from monai.inferers import SliceInferer
+#from monai.metrics import DiceMetric
+from monai.transforms import (
+    Compose,
+    EnsureChannelFirstd,
+    EnsureTyped,
+    LoadImaged,
+    RandRotate90d,
+    Resized,
+    ScaleIntensityd,
+    Spacingd,
+    Orientationd,
+    SqueezeDimd,
+    ResizeWithPadOrCropd,
+    CropForegroundd,
+    RandRotated,
+    CenterSpatialCropd,
+    Transposed,
+    ResampleToMatchd,
+    RandSpatialCropd,
+    Invertd,
+    AsDiscreted,
+    RandGaussianNoised,
+    RandGaussianSmoothd,
+    ScaleIntensityRangePercentilesd,
+    RandAdjustContrastd,
+    RandHistogramShiftd,
+    RandBiasFieldd,
+    RandFlipd,
+    RandAxisFlipd,
+    RandSpatialCropSamplesd,
+    RandSimulateLowResolutiond,
+)
+
+from scipy.ndimage.measurements import label
+
+def lesion_eval(seg,gtv,spacing_mm):
+  #filter out small unconnected segs
+    labeled_gtv=np.squeeze(gtv)
+    labeled_gtv[labeled_gtv>0.0]=1
+    labeled_gtv.astype(int)
+    structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
+    seg=np.squeeze(seg)
+    
+    
+    #labeled_gtv, ncomponents_gtv = label(gtv, structure) 
+    labeled_gtv=np.squeeze(gtv) #logic for assumed single lesion
+    ncomponents_gtv=1
+    
+    labeled_seg, ncomponents_seg = label(seg, structure) 
+    
+    #DSC_list=np.zeros([ncomponents_gtv,1])
+    #precision_list=np.zeros([ncomponents_seg,1])
+    DSC_array=np.zeros([ncomponents_seg,ncomponents_gtv])
+    #print('n components seg: %i' % ncomponents_seg)
+    for ilabel in range(0,ncomponents_seg):
+        #print('n seg: %i' % (ilabel+1))
+        for jlabel in range(0,ncomponents_gtv):
+            pred=np.zeros(np.shape(seg)) 
+            target=np.zeros(np.shape(seg)) 
+            
+            pred[labeled_seg==(ilabel+1)]=1.0
+            target[labeled_gtv==(jlabel+1)]=1.0
+            
+            DSC_array[ilabel,jlabel]=np.sum(pred*target)*2.0 /(np.sum(pred) + np.sum(target))
+            #print(DSC_array[ilabel,jlabel])
+            
+    final_pred=np.zeros(np.shape(seg)) 
+    FD=0.0
+    #print('Components: %i' %ncomponents_seg)
+    for ilabel in range(0,ncomponents_seg):
+        for jlabel in range(0,ncomponents_gtv):
+            if DSC_array[ilabel,jlabel]>=0.1:
+                #print('detection')
+                #print(np.sum((labeled_seg==ilabel+1)*labeled_gtv)*2.0 /(np.sum(labeled_seg==ilabel+1) + np.sum(labeled_gtv)))
+                final_pred[labeled_seg==ilabel+1]=1.0
+                
+            else:
+                # pred=np.zeros(np.shape(seg)) 
+                # pred[labeled_seg==ilabel+1]=1.0
+                FD+=1.0
+               
+                # if np.sum(pred)>25.0:
+                #     FD+=1
+                # else:
+                #     print("lesion size %i voxels filtered" % np.sum(pred))
+                # #     print('False Positive!')
+                # # else:
+                #     print('Too small to count!')
+                #     print(np.sum(pred))
+                     
+    # inter=np.sum(2*final_pred * labeled_gtv)
+    # union=inter+abs(np.sum(final_pred-labeled_gtv))
+    
+    
+    sd=HD.compute_surface_distances(final_pred.astype(bool), labeled_gtv.astype(bool), spacing_mm)
+    hd95=HD.compute_robust_hausdorff(sd,95)
+    
+    DSC=np.sum(final_pred*labeled_gtv)*2.0 /(np.sum(final_pred) + np.sum(labeled_gtv))
+    gt_vol=np.sum(labeled_gtv).astype(float)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0 #cm^3 #Nvoxels*(voxel dims in mm)*(10^-3 to get to cm^3)
+    pred_vol=np.sum(final_pred).astype(float)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0
+    
+    if hd95==float('Inf'):
+        hd95=float('NaN')
+        
+    if DSC==0:
+        DSC=float('NaN')  
+    
+    if pred_vol==0:
+        pred_vol=float('NaN')  
+       
+    return  DSC, FD, hd95, gt_vol, pred_vol, final_pred 
+        # if np.sum(labeled_seg==ilabel)<27:
+        #     seg[labeled_seg==ilabel]=
+
+
+def copy_info(src, dst):
+
+    dst.SetSpacing(src.GetSpacing())
+    dst.SetOrigin(src.GetOrigin())
+    dst.SetDirection(src.GetDirection())
+
+    return dst
+
+def partial_mixup(input: torch.Tensor,
+                  gamma: float,
+                  indices: torch.Tensor
+                  ) -> torch.Tensor:
+    if input.size(0) != indices.size(0):
+        raise RuntimeError("Size mismatch!")
+    perm_input = input[indices]
+    return input.mul(gamma).add(perm_input, alpha=1 - gamma)
+
+
+def mixup(input: torch.Tensor,
+          target: torch.Tensor,
+          gamma: float,
+          ) -> Tuple[torch.Tensor, torch.Tensor]:
+    indices = torch.randperm(input.size(0), device=input.device, dtype=torch.long)
+    return partial_mixup(input, gamma, indices), partial_mixup(target, gamma, indices)
+
+
+def calculate_roc_auc(pred_probs, gt_mask):
+    """
+    Calculate ROC curve and AUC without using sklearn, only using NumPy.
+    
+    Args:
+        pred_probs: Probability predictions (before thresholding)
+        gt_mask: Ground truth mask
+        
+    Returns:
+        auc: AUC score
+        fpr: False positive rates for ROC curve
+        tpr: True positive rates for ROC curve
+    """
+    # Flatten arrays
+    pred_flat = pred_probs.flatten()
+    gt_flat = gt_mask.flatten()
+    
+    # Only calculate AUC if there are positive examples
+    if np.sum(gt_flat) > 0 and np.sum(gt_flat) < len(gt_flat):
+        try:
+            # Sort predictions in descending order
+            sorted_indices = np.argsort(pred_flat)[::-1]
+            sorted_gt = gt_flat[sorted_indices]
+            
+            # Count total positives and negatives
+            n_pos = np.sum(gt_flat)
+            n_neg = len(gt_flat) - n_pos
+            
+            if n_pos == 0 or n_neg == 0:
+                return float('NaN'), None, None
+            
+            # Calculate True Positive Rate (TPR) and False Positive Rate (FPR) at each threshold
+            tp_cumsum = np.cumsum(sorted_gt)
+            fp_cumsum = np.cumsum(1 - sorted_gt)
+            
+            # Add origin point (0,0) to ROC curve
+            tpr = np.concatenate(([0], tp_cumsum / n_pos))
+            fpr = np.concatenate(([0], fp_cumsum / n_neg))
+            
+            # Add (1,1) point to ROC curve
+            tpr = np.append(tpr, 1.0)
+            fpr = np.append(fpr, 1.0)
+            
+            # Calculate AUC using trapezoidal rule
+            width = np.diff(fpr)
+            height = (tpr[:-1] + tpr[1:]) / 2
+            auc = np.sum(width * height)
+            
+            return auc, fpr, tpr
+        except Exception as e:
+            print(f"Error in ROC calculation: {e}")
+            return float('NaN'), None, None
+    else:
+        return float('NaN'), None, None
+
+def scale_ADC(image):
+    adc_max=image.data.amax()
+    adc_max=adc_max.data.cpu().numpy()
+    
+    
+    if adc_max<0.05:# input likely in  mm^2/s, 
+        print('Confirm units of ADC: input probably incorrectly in mm^2/s, normalizing with that assumption')
+        multiplier=1e6
+    elif adc_max<50:#input likely in  1e-3 mm^2/s, 
+        print('Confirm units of ADC: input probably incorrectly in 1e-3  mm^2/s, normalizing with that assumption')
+        multiplier=1
+    elif adc_max<50000:#input likely in  1e-6 mm^2/s, 
+        multiplier=1e-3
+        #print('Confirm units of ADC: input probably incorrectly in 1e-6  mm^2/s, normalizing with that assumption')
+    else:
+        print('Confirm units of ADC: values too large to be 1e-6  mm^2/s')
+    adc=2*(image.data*multiplier)/3.5-1
+    adc=t.clip(adc,min=-1.0,max=1.0)
+    
+    return adc
+
+
+
+
+def find_file_with_string(folder_path, target_string):
+    # Get the list of files in the specified folder
+    files = os.listdir(folder_path)
+    # Iterate through the files and find the first file containing the target string
+    for file in files:
+        if target_string in file:
+            # If the target string is found in the file name, return the file
+            return file
+    # If no matching file is found, return None
+    return None
+
+
+
+mr_paths = []
+seg_paths = []
+
+#Define input dimensions and resolution for inference model 
+PD_in=np.array([0.6250, 0.6250, 3]) # millimeters
+DIM_in=np.array([128,128,opt.nslices]) # 128x128 5 Slices
+nmodalities=1
+
+root_dir=os.getcwd()
+opt.nchannels=opt.nslices*nmodalities
+
+model = create_model(opt) 
+
+model_path = os.path.join(root_dir,opt.name,'AVG_best_finetuned') #load weights
+
+print('loading %s' %model_path)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.load_MR_seg_A(model_path) #use weights
+
+
+#Prep model for eval
+for m in model.netSeg_A.modules():
+    for child in m.children():
+        if type(child) == torch.nn.BatchNorm2d:
+            child.track_running_stats = False
+            child.running_mean = None
+            child.running_var = None
+
+
+
+
+
+
+
+#model.to(device)
+
+#freeze all layers
+#for param in model.netSeg_A.parameters():
+#        param.requires_grad = False
+
+                
+#impath = os.path.join(path,'nii_vols') #load weights
+#impath = os.path.join(root_dir,'training_data') #load weights
+valpath = os.path.join(root_dir,opt.data_folder) #load weights
+#valpath = os.path.join(root_dir,'test_data') #load weights
+
+
+#unfreeze final layer and Channel input block for finetuning
+# model.netSeg_A.CNN_block1.requires_grad_(True)
+# model.netSeg_A.out_conv.requires_grad_(True)
+# model.netSeg_A.out_conv1.requires_grad_(True)
+# if opt.deeplayer>0:
+#     model.netSeg_A.deepsupconv.requires_grad_(True)
+dest_path= os.path.join(root_dir,opt.name) 
+wt_path= os.path.join(root_dir,opt.name,'seg_test_DSC.csv')
+if not os.path.exists(dest_path):
+    os.makedirs(dest_path)
+fd_results = open(wt_path, 'w')
+fd_results.write('Filename, Lesion DSC, whole volume DSC, hd95 (mm), gt vol (mL), pred vol(mL), AUC \n')
+#fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
+    
+
+
+# results_path=os.path.join(root_dir,opt.name,'val_results')
+# if not os.path.exists(results_path):
+#     os.makedirs(results_path)   
+seg_path=os.path.join(root_dir,opt.name,'test_segs')
+if not os.path.exists(seg_path):
+    os.makedirs(seg_path)    
+
+# Create additional paths for new outputs
+softmax_path=os.path.join(root_dir,opt.name,'softmax_outputs')
+if not os.path.exists(softmax_path):
+    os.makedirs(softmax_path)
+
+
+
+
+types = ('ProstateX*_ep2d_diff_*.nii.gz', '*_ivim_adc.nii') # the tuple of file types
+val_images=[]
+for fname in types:
+   val_images.extend(glob(os.path.join(valpath, fname)))
+val_images = sorted(val_images)
+
+types = ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', '*_LES*.nii') # the tuple of file types
+val_segs=[]
+for fname in types:
+   val_segs.extend(glob(os.path.join(valpath, fname)))
+val_segs = sorted(val_segs)
+ 
+
+types = ('ProstateX*_t2_tse*.nii.gz', '*_tt2.nii') # the tuple of file types
+val_images_t2w=[]
+for fname in types:
+   val_images_t2w.extend(glob(os.path.join(valpath, fname)))
+val_images_t2w = sorted(val_images_t2w)
+
+#types = ('ProstateX-????.nii.gz', '*_mask_map.nii') # the tuple of file types
+#val_prost=[]
+#for fname in types:
+    #val_prost.extend(glob(os.path.join(valpath, fname)))
+#val_prost = sorted(val_prost)
+
+
+
+opt.extra_neg_slices=5
+
+# print(images)
+# print(segs)
+# print(images_t2w)
+
+# print(val_images)
+# print(val_segs)
+# print(val_images_t2w)
+# print(val_prost)
+
+
+val_files = [{"img": img, "seg": seg} for img, seg in zip(val_images, val_segs)] #last  n_val to validation
+
+
+val_transforms = Compose(
+    [
+        LoadImaged(keys=["img","seg"]),
+        EnsureChannelFirstd(keys=["img", "seg"]),
+        Orientationd(keys=["img","seg"], axcodes="RAS"),     
+        
+        ResampleToMatchd(keys=["seg"],
+                             key_dst="img",
+                             mode=("nearest")),
+        # Spacingd(keys=["img", "seg"],
+        #              pixdim=(PD_in[0], PD_in[1], PD_in[2]),
+        #              mode=("bilinear", "nearest")),
+        Spacingd(keys=["img", "seg"],
+                     pixdim=(PD_in[0], PD_in[1]),
+                     mode=("bilinear", "nearest")),
+        ScaleIntensityRangePercentilesd(keys=["img"],lower=0,upper=99,b_min=-1.0,b_max=1.0,clip=True),
+        
+        #CenterSpatialCropd(keys=["img", "seg"], roi_size=[192, 192,28]),
+        CropForegroundd(keys=["img","seg"], source_key= "seg", margin=[96,96,opt.extra_neg_slices+(opt.nslices-1)/2]),
+        #RandSpatialCropd(keys=["img","t2w","seg"], roi_size=(128, 128, opt.nslices),random_size=False),
+        EnsureTyped(keys=["img", "seg"]),
+    ]
+)
+
+post_transforms = Compose([
+        EnsureTyped(keys=["pred","seg"]),
+        Invertd(
+            keys=["pred","seg"],
+            transform=val_transforms,
+            orig_keys="img",
+            meta_keys=["pred_meta_dict","pred_meta_dict"],
+            orig_meta_keys="image_meta_dict",
+            meta_key_postfix="meta_dict",
+            nearest_interp=True,
+            to_tensor=True,
+        ),
+        AsDiscreted(keys=["pred","seg"], argmax=False),
+    ])
+
+# Create post-processing for softmax (without discretization)
+post_transforms_softmax = Compose([
+    EnsureTyped(keys=["softmax"]),
+    Invertd(
+        keys=["softmax"],
+        transform=val_transforms,
+        orig_keys="img",
+        meta_keys=["softmax_meta_dict"],
+        orig_meta_keys="image_meta_dict",
+        meta_key_postfix="meta_dict",
+        nearest_interp=False,  # Use bilinear for continuous values
+        to_tensor=True,
+    ),
+    # No AsDiscreted transform for softmax
+])
+
+
+# 3D dataset with preprocessing transforms
+# train_ds = monai.data.CacheDataset(data=train_files, transform=train_transforms)
+# #train_ds = monai.data.ShuffleBuffer(patch_ds, seed=0) #patch based trainer
+
+
+
+val_ds = monai.data.CacheDataset(data=val_files, transform=val_transforms)
+
+
+# train_loader = DataLoader(
+#     train_ds,
+#     batch_size=opt.batchSize,
+#     num_workers=1,
+#     pin_memory=torch.cuda.is_available(),
+#     drop_last=True
+# )
+val_loader = DataLoader(
+    val_ds,
+    batch_size=1,
+    num_workers=1,
+    pin_memory=torch.cuda.is_available(),
+)
+
+
+# check_data = monai.utils.misc.first(val_loader)
+# print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
+
+# sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_t2w.nii.gz'))
+# sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_adc.nii.gz'))
+# sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_SEG.nii.gz'))
+# sitk.WriteImage(sitk.GetImageFromArray(check_data["prost"].cpu()[:,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_PROST.nii.gz'))
+
+
+num_epochs=opt.niter+opt.niter_decay
+epoch_loss_values = []
+best_dice=0
+mixup_ab=opt.mixup_betadist
+
+with torch.no_grad(): # no grade calculation 
+    dice_3D=[]
+    Lesion_Dice=[]
+    hd95_list=[]
+    False_positives=[]
+    auc_list=[]
+    smooth=1
+    step=0
+    for val_data in val_loader:
+        step += 1
+        adc, label_val = val_data["img"].to(device), val_data["seg"].to(device)
+        
+
+        label_val_vol=label_val
+        #if torch.sum(label_val)>0:
+        # adc=scale_ADC(adc)
+        
+        val_inputs=adc
+       
+        adc_name=adc.meta['filename_or_obj'][0].split('/')[-1]
+        #t2_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+        gtv_name=label_val.meta['filename_or_obj'][0].split('/')[-1]
+        
+        print('  ADC: %s GTV: %s' % (adc_name, gtv_name))
+       
+        with autocast(enabled=True):
+            #pass model segmentor and region info
+            #input, roi size, sw batch size, model, overlap (0.5)
+            val_outputs = sliding_window_inference(val_inputs,
+                                                  (128, 128, opt.nslices),
+                                                  1,
+                                                  model.netSeg_A,
+                                                  overlap=0.66,
+                                                  mode="gaussian",
+                                                  sigma_scale=[0.128, 0.128,0.01])
+            
+            # Create a copy for prediction data
+            val_data_pred = val_data.copy()
+            val_data_pred["pred"] = val_outputs
+        
+        # Process binary predictions through normal pipeline
+        val_data_pred = [post_transforms(i) for i in decollate_batch(val_data_pred)]
+        
+        # Process each case individually for softmax to maintain proper alignment
+        val_data_softmax = val_data.copy()
+        val_data_softmax["softmax"] = val_outputs.clone()
+        val_data_softmax_list = decollate_batch(val_data_softmax)
+        
+        # Process each case to get correctly aligned softmax outputs
+        for i, case in enumerate(val_data_softmax_list):
+            processed_case = post_transforms_softmax(case)
+            softmax = processed_case["softmax"]
+            
+            # Get the original image path for correct alignment
+            img_path = case["img"].meta['filename_or_obj']
+            img_name = os.path.basename(img_path)
+            
+            # Read the original image to get spatial information
+            orig_img = sitk.ReadImage(img_path)
+            
+            # Convert softmax to numpy array
+            softmax_np = np.array(softmax)
+            
+            # Create an ITK image with the softmax data
+            softmax_img = sitk.GetImageFromArray(softmax_np)
+            
+            # Copy spatial information from original image
+            softmax_img = copy_info(orig_img, softmax_img)
+            
+            # Save with appropriate name
+            sitk.WriteImage(softmax_img, os.path.join(softmax_path, f'softmax_{img_name}'))
+            
+            # Calculate AUC using properly aligned data
+            gtv_np = np.array(processed_case["seg"])
+            auc_score, fpr, tpr = calculate_roc_auc(softmax_np, gtv_np)
+            auc_list.append(auc_score)
+            
+            # Create ROC plot if AUC is valid
+            if not np.isnan(auc_score) and fpr is not None and tpr is not None:
+                plt.figure()
+                plt.plot(fpr, tpr, label=f'AUC = {auc_score:.3f}')
+                plt.plot([0, 1], [0, 1], 'k--')
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title(f'ROC Curve - {img_name}')
+                plt.legend()
+                plt.savefig(os.path.join(dest_path, f'roc_{img_name.split(".")[0]}.png'))
+                plt.close()
+        
+        # Extract the results from val_data_pred for further processing
+        seg = from_engine(["pred"])(val_data_pred)[0]
+        gtv = from_engine(["seg"])(val_data_pred)[0]
+        
+        # Convert to numpy arrays and squeeze dimensions
+        gtv = np.array(gtv)
+        gtv = np.squeeze(gtv)
+        seg = np.array(seg)
+        seg = np.squeeze(seg)
+        
+        seg[seg >= 0.5] = 1.0
+        seg[seg < 0.5] = 0.0
+        seg_filtered = np.array(seg)   
+        
+        #if np.sum(gtv)>25.0:
+        if  np.sum(gtv)>5: 
+            
+            # prostate = np.array(prostate)
+            # prostate=np.squeeze(prostate)
+            # prostate=ndimage.binary_dilation(prostate).astype(prostate.dtype)
+            # if np.sum(prostate*gtv)<(0.9*np.sum(gtv)):
+            #     prostate[prostate<1.0]=1.0
+            #     print('prostate mask issue')
+            
+            
+            #print('seg sum:', np.sum(seg) )
+            #print('seg max:', np.max(seg) )
+            
+            
+            
+            #print('seg sum2:', np.sum(seg) )
+            
+            
+            
+            #seg_filtered[prostate < 0.5]=0.0
+            
+            # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
+            # structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
+            # labeled, ncomponents = label(seg_filtered, structure)    
+            # for ilabel in range(0,ncomponents+1):
+            #     if np.sum(labeled==ilabel+1)<27:
+            #         seg_filtered[labeled==ilabel]=0
+    
+           
+            # print(np.ndim(seg))
+            # print(seg)
+            # print(np.shape(seg))
+            
+            # t2w=t2w[0,:,:,:,2]
+            # adc=adc[0,:,:,:,2]
+            # label_val=label_val[0,:,:,:,2]
+            
+            
+            # transform = transforms.ToPILImage()
+            # t2w = transform(t2w)
+            # adc = transform(adc+1)
+            # label_png = transform(label_val)
+            # t2w.save('t2w.png')
+            # adc.save('adc.png')
+            # label_png.save('label.png')
+            #seg = np.array(seg)
+            #prostate= from_engine(["prost"])(val_data)[0]
+            #prostate = np.array(prostate)
+            #prostate=np.squeeze(prostate)
+            
+            
+            #seg[seg >= 0.5]=1.0
+            #seg[seg < 0.5]=0.0
+            
+            # seg_filtered= np.array(seg)
+            #seg_filtered[prostate < 0.5]=0.0
+            img_name=adc.meta['filename_or_obj'][0].split('/')[-1]
+            cur_rd_path=os.path.join(valpath,img_name)
+            im_obj = sitk.ReadImage(cur_rd_path)
+            
+            spacing_mm=im_obj.GetSpacing()
+            
+            seg_temp=np.array(seg_filtered)
+            #gt_temp=np.array(label_val_vol.cpu())
+            
+            gtv=np.squeeze(gtv)
+            
+            # print(np.shape(seg_temp))
+            # print(np.shape(gtv))
+            
+            seg_flt=seg_temp.flatten()
+            gt_flt=gtv.flatten()
+            
+            #print(img_name)
+            
+            intersection = np.sum(seg_flt * (gt_flt > 0))
+            dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
+            dice_3D.append(dice_3D_temp)
+            
+            DSC,FP,hd95, gt_vol, pred_vol,final_pred=lesion_eval(seg_filtered,gtv,spacing_mm)
+            Lesion_Dice.append(DSC)
+            hd95_list.append(hd95)
+            False_positives.append(FP)
+            
+            print('  Lesion DSC: %f, Lesion HD95: %f mm, Volumetric DSC: %f' %(DSC, hd95, dice_3D_temp))
+            print('  Lesion vol: %f mL, prediction vol: %f mL' %(gt_vol, softmax_{img_name}'))
+
+            # Calculate AUC using aligned data
+            gtv_np = np.array(processed_case["seg"])
+            auc_score, fpr, tpr = calculate_roc_auc(softmax_np, gtv_np)
+            auc_list.append(auc_score)
+            
+            # Create ROC plot if AUC is valid
+            if not np.isnan(auc_score) and fpr is not None and tpr is not None:
+                plt.figure()
+                plt.plot(fpr, tpr, label=f'AUC = {auc_score:.3f}')
+                plt.plot([0, 1], [0, 1], 'k--')
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title(f'ROC Curve - {img_name}')
+                plt.legend()
+                plt.savefig(os.path.join(dest_path, f'roc_{img_name.split(".")[0]}.png'))
+                plt.close()
+        
+        # Extract the results from val_data_pred for further processing
+        seg = from_engine(["pred"])(val_data_pred)[0]
+        gtv = from_engine(["seg"])(val_data_pred)[0]
+        
+        # Convert to numpy arrays and squeeze dimensions
+        gtv = np.array(gtv)
+        gtv = np.squeeze(gtv)
+        seg = np.array(seg)
+        seg = np.squeeze(seg)
+        
+        seg[seg >= 0.5] = 1.0
+        seg[seg < 0.5] = 0.0
+        seg_filtered = np.array(seg)   
+        
+        #if np.sum(gtv)>25.0:
+        if  np.sum(gtv)>5: 
+            
+            # prostate = np.array(prostate)
+            # prostate=np.squeeze(prostate)
+            # prostate=ndimage.binary_dilation(prostate).astype(prostate.dtype)
+            # if np.sum(prostate*gtv)<(0.9*np.sum(gtv)):
+            #     prostate[prostate<1.0]=1.0
+            #     print('prostate mask issue')
+            
+            
+            #print('seg sum:', np.sum(seg) )
+            #print('seg max:', np.max(seg) )
+            
+            
+            
+            #print('seg sum2:', np.sum(seg) )
+            
+            
+            
+            #seg_filtered[prostate < 0.5]=0.0
+            
+            # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
+            # structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
+            # labeled, ncomponents = label(seg_filtered, structure)    
+            # for ilabel in range(0,ncomponents+1):
+            #     if np.sum(labeled==ilabel+1)<27:
+            #         seg_filtered[labeled==ilabel]=0
+    
+           
+            # print(np.ndim(seg))
+            # print(seg)
+            # print(np.shape(seg))
+            
+            # t2w=t2w[0,:,:,:,2]
+            # adc=adc[0,:,:,:,2]
+            # label_val=label_val[0,:,:,:,2]
+            
+            
+            # transform = transforms.ToPILImage()
+            # t2w = transform(t2w)
+            # adc = transform(adc+1)
+            # label_png = transform(label_val)
+            # t2w.save('t2w.png')
+            # adc.save('adc.png')
+            # label_png.save('label.png')
+            #seg = np.array(seg)
+            #prostate= from_engine(["prost"])(val_data)[0]
+            #prostate = np.array(prostate)
+            #prostate=np.squeeze(prostate)
+            
+            
+            #seg[seg >= 0.5]=1.0
+            #seg[seg < 0.5]=0.0
+            
+            # seg_filtered= np.array(seg)
+            #seg_filtered[prostate < 0.5]=0.0
+            img_name=adc.meta['filename_or_obj'][0].split('/')[-1]
+            cur_rd_path=os.path.join(valpath,img_name)
+            im_obj = sitk.ReadImage(cur_rd_path)
+            
+            spacing_mm=im_obj.GetSpacing()
+            
+            seg_temp=np.array(seg_filtered)
+            #gt_temp=np.array(label_val_vol.cpu())
+            
+            gtv=np.squeeze(gtv)
+            
+            # print(np.shape(seg_temp))
+            # print(np.shape(gtv))
+            
+            seg_flt=seg_temp.flatten()
+            gt_flt=gtv.flatten()
+            
+            #print(img_name)
+            
+            intersection = np.sum(seg_flt * (gt_flt > 0))
+            dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
+            dice_3D.append(dice_3D_temp)
+            
+            DSC,FP,hd95, gt_vol, pred_vol,final_pred=lesion_eval(seg_filtered,gtv,spacing_mm)
+            Lesion_Dice.append(DSC)
+            hd95_list.append(hd95)
+            False_positives.append(FP)
+            
+            print('  Lesion DSC: %f, Lesion HD95: %f mm, Volumetric DSC: %f' %(DSC, hd95, dice_3D_temp))
+            print('  Lesion vol: %f mL, prediction vol: %f mL' %(gt_vol,pred_vol))
+            print('  AUC: %f' % auc_score)  # Print AUC score
+        
+            
+            
+            fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) + ',' + str(gt_vol) + ',' + str(pred_vol) + ',' + str(auc_score) +'\n' )
+    
+    
+            
+            final_pred = np.transpose(final_pred, (2, 1, 0))
+            seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
+            gtv = np.transpose(gtv, (2, 1, 0))
+            #prostate = np.transpose(prostate, (2, 1, 0))
+            
+            # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
+            
+            
+            
+            # seg = sitk.GetImageFromArray(seg)
+            # seg = copy_info(im_obj, seg)
+            # sitk.WriteImage(seg,  os.path.join(seg_path,'seg_%s' % img_name))
+            
+            
+            seg_filtered = sitk.GetImageFromArray(seg_filtered)
+            seg_filtered = copy_info(im_obj, seg_filtered)
+            sitk.WriteImage(seg_filtered,  os.path.join(seg_path,'filteredseg_%s' % img_name))
+            
+            gtv = sitk.GetImageFromArray(gtv)
+            gtv = copy_info(im_obj, gtv)
+            sitk.WriteImage(gtv,  os.path.join(seg_path,'gtv_%s' % img_name))
+            
+            final_pred = sitk.GetImageFromArray(final_pred)
+            final_pred = copy_info(im_obj, final_pred)
+            sitk.WriteImage(final_pred,  os.path.join(seg_path,'final_pred_%s' % img_name))
+            
+            
+            
+            # prostate = sitk.GetImageFromArray(prostate)
+            # prostate = copy_info(im_obj, prostate)
+            # sitk.WriteImage(prostate,  os.path.join(seg_path,'prostateseg_%s' % img_name))
+        
+            #model.save('AVG_best_finetuned')
+    dice_3D=np.median(dice_3D)
+    median_Lesion_Dice=np.nanmedian(Lesion_Dice)
+    median_hd95=np.nanmedian(hd95_list)
+    median_auc=np.nanmedian(auc_list) 
+    
+    print('Median whole volume dice: %f' % dice_3D)
+    print('Median Lesion dice: %f' % median_Lesion_Dice)
+    #print('mean HD95: %f' % mean_hd95)
+    print('median Lesion HD95: %f' % median_hd95)
+    print('median AUC: %f' % median_auc)  
+     
+    # print(Lesion_Dice)
+    # print(FP)
+    
+    # print(np.sum(np.float(np.array(Lesion_Dice)>0.1)))
+    # print(np.float(np.size(Lesion_Dice)))
+    
+    
+    recall=np.sum(np.array(Lesion_Dice)>0.1).astype(float)/float(np.size(Lesion_Dice))
+    #print(recall)
+    print('recall: %f' % recall)
+    
+    precision=np.sum(np.array(Lesion_Dice)>0.1).astype(float)/float(np.size(Lesion_Dice)+np.sum(False_positives))
+    # print(np.sum(np.array(Lesion_Dice)>0.1).astype(float))
+    # print(np.size(Lesion_Dice))
+    # print(np.sum(FP))
+    # print(float(np.size(Lesion_Dice)+np.sum(FP)))
+    
+    # print(np.sum(np.float(np.array(Lesion_Dice)>0.1)))
+    # print(np.float(np.size(Lesion_Dice)+np.sum(FP)))
+    
+    
+    # print(precision)
+    print('precision: %f' % precision)
+    #print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
+    fd_results.flush()  
+    
+    wt2_path= os.path.join(root_dir,opt.name,'Result_summary.csv')
+    fd_results_sum = open(wt2_path, 'w')
+    fd_results_sum.write('name, median Lesion DSC, median whole volume DSC, median lesion hd95 (mm), precision, recall, median AUC \n')
+    fd_results_sum.write(opt.name + ',' + str(median_Lesion_Dice) +','+ str(dice_3D) + ',' + str(median_hd95) + ',' + str(precision) + ',' + str(recall) + ',' + str(median_auc) +'\n')
+    fd_results_sum.flush()  
+    # if lr>0:
+    #         model.update_learning_rate()
