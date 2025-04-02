@@ -620,7 +620,7 @@ for epoch in range(num_epochs+1):
         # for ibatch in range(0,opt.batchSize+1):
         #     adc[ibatch,:]=scale_ADC(adc[ibatch,:])
         
-        inputs=torch.cat((adc,t2w,perf),dim=2)
+        inputs=torch.cat((adc,t2w,perf),dim=1)
         labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
         #labels=labels[:,2,:,:]
         
@@ -667,7 +667,7 @@ for epoch in range(num_epochs+1):
                 #if torch.sum(label_val)>0:
                 # adc=scale_ADC(adc)
                 
-                val_inputs=torch.cat((adc,t2w,perf),dim=2)
+                val_inputs=torch.cat((adc,t2w,perf),dim=1)
                
                 
                 with autocast(enabled=True):
@@ -777,7 +777,7 @@ for epoch in range(num_epochs+1):
                         #if torch.sum(label_val)>0:
                         # adc=scale_ADC(adc)
                         
-                        val_inputs=torch.cat((adc,t2w, perf),dim=2)
+                        val_inputs=torch.cat((adc,t2w, perf),dim=1)
                        
                         
                         with autocast(enabled=True):
