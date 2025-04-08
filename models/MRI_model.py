@@ -851,12 +851,24 @@ class MRRN_Segmentor(BaseModel):
     def load_MR_seg_A(self, weight):
         self.load_network(self.netSeg_A,'Seg_A',weight)
 
-    def optimize_parameters(self):
-        # forward
-        self.forward()
+def optimize_parameters(self, accumulate=False):
+    """
+    Calculate losses, gradients, and update network weights.
+    
+    Parameters:
+        accumulate (bool): If True, accumulate gradients instead of updating weights immediately
+    """
+    # forward
+    self.forward()
+    
+    # Only zero gradients if we're not accumulating
+    if not accumulate:
         self.optimizer_Seg_A.zero_grad()
 
-        self.backward_Seg_A()
+    self.backward_Seg_A()
+    
+    # Only update weights if we're not accumulating
+    if not accumulate:
         self.optimizer_Seg_A.step()
 
 
