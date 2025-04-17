@@ -557,8 +557,8 @@ for epoch in range(num_epochs+1):
                         #if torch.sum(label_val)>0:
                         # adc=scale_ADC(adc)
                         
-                        val_inputs=torch.cat((adc,t2w),dim=1)
-                       
+                        #val_inputs=torch.cat((adc,t2w),dim=1)
+                        val_inputs=adc
                         
                         with autocast(enabled=True):
                             #pass model segmentor and region info

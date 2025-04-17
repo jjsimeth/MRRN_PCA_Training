@@ -494,7 +494,7 @@ for epoch in range(num_epochs+1):
                 step += 1
                 adc, label_val,t2w,prost = val_data["img"].to(device), val_data["seg"].to(device), val_data["t2w"].to(device), val_data["prost"].to(device)
                 label_val_vol=label_val
-                val_inputs=torch.cat((adc,t2w),dim=1)
+                #val_inputs=torch.cat((adc,t2w),dim=1)
                 val_inputs=t2w
                
                 
@@ -557,8 +557,8 @@ for epoch in range(num_epochs+1):
                         #if torch.sum(label_val)>0:
                         # adc=scale_ADC(adc)
                         
-                        val_inputs=torch.cat((adc,t2w),dim=1)
-                       
+                        #val_inputs=torch.cat((adc,t2w),dim=1)
+                        val_inputs=t2w
                         
                         with autocast(enabled=True):
                             #pass model segmentor and region info
