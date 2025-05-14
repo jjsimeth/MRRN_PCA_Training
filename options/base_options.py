@@ -30,7 +30,8 @@ class BaseOptions():
         #self.parser.add_argument('--n_layers_D', type=int, default=5, help='only used if which_model_netD==n_layers')
         self.parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
         self.parser.add_argument('--name', type=str, default='deep_model', help='name of the experiment. It decides where to store samples and models')
-        #self.parser.add_argument('--dataset_mode', type=str, default='aligned', help='chooses how datasets are loaded. [unaligned | aligned | single]')
+        self.parser.add_argument('--ensemble_models', type=str, default='deep_model', 
+                                help='comma-separated names of models to use for ensembling (e.g., "model1,model2,model3")')        #self.parser.add_argument('--dataset_mode', type=str, default='aligned', help='chooses how datasets are loaded. [unaligned | aligned | single]')
         self.parser.add_argument('--model', type=str, default='MRRN_Segmentor',help='chooses which model to use. cycle_gan, pix2pix, test')
         #self.parser.add_argument('--which_direction', type=str, default='AtoB', help='AtoB or BtoA')
         self.parser.add_argument('--nThreads', default=4, type=int, help='# threads for loading data')
@@ -72,6 +73,9 @@ class BaseOptions():
             torch.cuda.set_device(self.opt.gpu_ids[0])
 
         args = vars(self.opt)
+        
+        # split ensemble models string into a list with multiple models
+        self.opt.ensemble_models = [model.strip() for model in self.opt.ensemble_models.split(',')]
 
         print('------------ Options -------------')
         for k, v in sorted(args.items()):
