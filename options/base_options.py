@@ -72,10 +72,10 @@ class BaseOptions():
         if len(self.opt.gpu_ids) > 0:
             torch.cuda.set_device(self.opt.gpu_ids[0])
 
-        args = vars(self.opt)
-        
         # split ensemble models string into a list with multiple models
         self.opt.ensemble_models = [model.strip() for model in self.opt.ensemble_models.split(',')]
+        
+        args = vars(self.opt)
 
         print('------------ Options -------------')
         for k, v in sorted(args.items()):
