@@ -101,12 +101,13 @@ class EnsembleInference:
                 - 'weight': Optional weighting factor (default 1.0)
             device: Computation device (CPU/GPU)
         """
-        self.models = []
+        self.models = []  # Store model objects
         self.weights = []
         self.device = device
         self.model_names = []
         
         # Load all models
+        print(f"Using the following model config to initialize ensemble object/model: {model_configs}")
         for config in model_configs:
             # Get model-specific options or use default
             if 'opt' in config and config['opt'] is not None:
@@ -131,7 +132,7 @@ class EnsembleInference:
             self._prepare_model_for_eval(model)
             
             # Store model components
-            self.models.append(model.netSeg_A)
+            self.models.append(model) 
             self.weights.append(model_weight)
             self.model_names.append(model_name)
             
@@ -177,7 +178,7 @@ class EnsembleInference:
                     input_tensor, 
                     roi_size,
                     sw_batch_size,
-                    model,
+                    model.netSeg_A,
                     overlap=overlap,
                     mode="gaussian",
                     sigma_scale=[0.128, 0.128, 0.01]
@@ -357,6 +358,36 @@ def find_file_with_string(folder_path, target_string):
     # If no matching file is found, return None
     return None
 
+def create_model_configs(opt, root_dir):
+    """
+    Create model configurations for ensemble inference from a list of model names.
+    
+    Args:
+        opt: Options containing ensemble_models list
+        root_dir: Root directory where model folders are located
+    
+    Returns:
+        List of model configuration dictionaries
+    """
+    model_configs = []
+    
+    # Loop through each model name in the ensemble_models list
+    for model_name in opt.ensemble_models:
+        # Construct path using provided pattern
+        model_path = os.path.join(root_dir, model_name, 'AVG_best_finetuned')
+        
+        # Create a configuration dictionary for this model
+        model_config = {
+            'path': model_path,
+            'name': model_name,
+            'weight': 1.0,  # Default equal weight
+            'opt': None     # Use default options
+        }
+        
+        model_configs.append(model_config)
+        print(f"Added model config for: {model_name}")
+    
+    return model_configs
 
 
 mr_paths = []
@@ -371,42 +402,13 @@ root_dir=os.getcwd()
 opt.nchannels=opt.nslices*nmodalities
 
 #model = create_model(opt) 
-
 #model_path = os.path.join(root_dir,opt.name,'AVG_best_finetuned') #load weights
 
 #print('loading %s' %model_path)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_configs = [
-    {
-        'path': os.path.join(root_dir, 'T2_fold1_MSK', 'AVG_best_finetuned'),
-        'name': 'Model_1',
-        'weight': 1.0,
-        'opt': None  # Use default options
-    },
-    {
-        'path': os.path.join(root_dir, 'T2_fold1_NKI', 'AVG_best_finetuned'),
-        'name': 'Model_2',
-        'weight': 1.0,  
-        'opt': None  # Use default options
-    },
-    {
-        'path': os.path.join(root_dir, 'T2_fold2_MSK', 'AVG_best_finetuned'),
-        'name': 'Model_3',
-        'weight': 1.0,  
-        'opt': None  # Use default options
-    }
-    {
-        'path': os.path.join(root_dir, 'T2_fold2_NKI', 'AVG_best_finetuned'),
-        'name': 'Model_3',
-        'weight': 1.0,  
-        'opt': None  # Use default options
-    }
-]
-
 #model.load_MR_seg_A(model_path) #use weights
-
 
 #Prep model for eval
 #for m in model.netSeg_A.modules():
@@ -416,9 +418,11 @@ model_configs = [
            # child.running_mean = None
            # child.running_var = None
 
+# Create model configurations from ensemble_models list
+model_configs = create_model_configs(opt, root_dir)
 
+# Initialize ensemble with model configurations
 ensemble = EnsembleInference(model_configs, device)
-
 
 
 #model.to(device)
@@ -693,13 +697,14 @@ with torch.no_grad(): # no grade calculation
         with autocast(enabled=True):
             #pass model segmentor and region info
             #input, roi size, sw batch size, model, overlap (0.5)
-            val_data["pred"] = sliding_window_inference(val_inputs,
-                                                        (128, 128, opt.nslices),
-                                                        1,
-                                                        model.netSeg_A,
-                                                        overlap=0.66,
-                                                        mode="gaussian",
-                                                        sigma_scale=[0.128, 0.128,0.01])
+            # Run ensemble inference
+            val_data["pred"], individual_preds = ensemble.inference(
+                val_inputs,
+                (128, 128, opt.nslices),
+                1,
+                overlap=0.66,
+                combination_method='weighted_average'
+            )
             
 
         val_data = [post_transforms(i) for i in decollate_batch(val_data)]
