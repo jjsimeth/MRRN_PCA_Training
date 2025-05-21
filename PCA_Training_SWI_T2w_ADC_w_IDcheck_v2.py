@@ -666,7 +666,7 @@ for epoch in range(num_epochs+1):
                                                                 model.netSeg_A,
                                                                 overlap=0.66,
                                                                 mode="gaussian",
-                                                                sigma_scale=[0.128, 0.128,0.01])
+                                                                sigma_scale=[0.128, 0.128,0.001])
             
                 seg = from_engine(["pred"])(val_data)
                 #print("seg length: ", len(seg))
