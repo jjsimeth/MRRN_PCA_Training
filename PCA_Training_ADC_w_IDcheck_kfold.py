@@ -277,9 +277,9 @@ nmodalities=1
 root_dir=os.getcwd()
 opt.nchannels=opt.nslices*nmodalities
 
-model = create_model(opt) 
 
-model_path = os.path.join(root_dir,'deep_model','MRRNDS_model') #load weights
+
+#model_path = os.path.join(root_dir,'deep_model','MRRNDS_model') #load weights
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #model.load_MR_seg_A(model_path) #use weights
@@ -513,7 +513,7 @@ folds = kfold_split(AllData,Allgroups,k)
 
 for jk, (train_files, val_files) in enumerate(folds):
     
-    
+    model = create_model(opt) 
     # train_ds = monai.data.Dataset(data=train_files, transform=train_transforms)
     # val_ds = monai.data.Dataset(data=val_files, transform=val_transforms)
     
