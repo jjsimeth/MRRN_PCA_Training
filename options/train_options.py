@@ -59,6 +59,7 @@ class TrainOptions(BaseOptions):
         self.parser.add_argument('--beta1', type=float, default=0.9, help='momentum term of adam')
         self.parser.add_argument('--lr', type=float, default=0.0001, help='initial learning rate for adam')
         self.parser.add_argument('--stn_lr', type=float, default=0.00002, help='initial learning rate for adam')
+        
         #self.parser.add_argument('--no_lsgan', action='store_true', help='do *not* use least square GAN, if false, use vanilla GAN')
         #self.parser.add_argument('--use_aug', type=int, default=0,help='do *not* use augmentation on training data')  
         #self.parser.add_argument('--use_mixup', type=int, default=0,help='do *not* use augmentation on training data')   
@@ -95,7 +96,7 @@ class TrainOptions(BaseOptions):
         #self.parser.add_argument('--lr_policy', type=str, default='lambda', help='learning rate policy: lambda|step|plateau')
         #self.parser.add_argument('--T_mult', type=int, default=2, help='learning rate policy: lambda|step|plateau')
         #self.parser.add_argument('--T_0', type=int, default=5000, help='learning rate policy: lambda|step|plateau')
-        
+        self.parser.add_argument('--modality', type=str, default='ADC', help='modality to use')
         
         
         # self.parser.add_argument('--lr_decay_iters', type=int, default=30, help='multiply by a gamma every lr_decay_iters iterations')
