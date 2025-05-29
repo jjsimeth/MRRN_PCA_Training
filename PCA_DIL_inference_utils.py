@@ -35,6 +35,7 @@ def sliding_window_inference(
     cval: float = 0.0,
     sw_device: Union[torch.device, str, None] = None,
     device: Union[torch.device, str, None] = None,
+    options=None,
     *args: Any,
     **kwargs: Any,
 ) -> torch.Tensor:
@@ -140,7 +141,8 @@ def sliding_window_inference(
         window_data = torch.cat([inputs[win_slice] for win_slice in unravel_slice]).to(sw_device)
         
         #fix windowed data
-        window_data=torch.permute(window_data, (0,1,4,3,2))
+        #window_data=torch.permute(window_data, (0,1,4,3,2))
+        window_data=torch.permute(window_data, (0,1,4,2,3))
         window_size=np.shape(window_data)
         #window_data=window_data.reshape(sw_batch_size, roi_size[2] * 2, roi_size[0], roi_size[0])
         window_data=window_data.reshape(window_size[0], window_size[1] * window_size[2], window_size[3], window_size[4])
@@ -183,9 +185,15 @@ def sliding_window_inference(
         # window_data[window_data>threshold]=threshold
         # window_data[window_data<0.0]=0.0
         # window_data=window_data/(threshold/2.0)-1
-        seg_prob, deep = predictor(window_data, *args, **kwargs)  # batched patch segmentation
+       
         # seg_prob = np.asarray(predictor(window_data, *args, **kwargs)) # batched patch segmentation
         
+        #
+        if hasattr(options, 'model_type') and options.model_type == 'deep':
+            seg_prob, deep = predictor(window_data, *args, **kwargs)  # batched patch segmentation
+        else:
+            seg_prob = predictor(window_data, *args, **kwargs)  # batched patch segmentation
+        #seg_prob= predictor(window_data, *args, **kwargs)  # batched patch segmentation
         
         # print(np.shape(seg_prob))
         

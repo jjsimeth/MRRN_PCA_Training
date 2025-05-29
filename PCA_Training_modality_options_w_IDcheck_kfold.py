@@ -295,20 +295,20 @@ root_dir=os.getcwd()
 opt.nchannels=opt.nslices*nmodalities
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-seg_loss1 = DiceCELoss( smooth_nr=1e-5,
-                            softmax=True,
-                            #include_background =False,
-                            #to_onehot_y=True,
+# seg_loss1 = DiceCELoss( smooth_nr=1e-5,
+#                             softmax=True,
+#                             #include_background =False,
+#                             #to_onehot_y=True,
                             
-                            weight=torch.tensor([0.001, 0.999],dtype=torch.float).to(device),
-                            smooth_dr=1e-5,
-                            )
-seg_loss2 = MaskedDiceLoss(smooth_nr=1e-5,
-                           softmax=True,
-                           #include_background =False,
-                           #to_onehot_y=True,
+#                             weight=torch.tensor([0.001, 0.999],dtype=torch.float).to(device),
+#                             smooth_dr=1e-5,
+#                             )
+# seg_loss2 = MaskedDiceLoss(smooth_nr=1e-5,
+#                            softmax=True,
+#                            #include_background =False,
+#                            #to_onehot_y=True,
                            
-                           smooth_dr=1e-5)
+#                            smooth_dr=1e-5)
 
 
 #model_path = os.path.join(root_dir,'deep_model','MRRNDS_model') #load weights
@@ -606,12 +606,12 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
     epoch_loss_values = []
     best_dice=0
     mixup_ab=opt.mixup_betadist
-    optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr)
+    #optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr)
     for epoch in range(num_epochs+1):
         
         
-        if epoch>=opt.niter:
-            optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr*(1.0-(epoch-opt.niter_decay+opt.niter)/(num_epochs)))
+        # if epoch>=opt.niter:
+        #     optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr*(1.0-(epoch-opt.niter_decay+opt.niter)/(num_epochs)))
         
         #lr=model.get_curr_lr()
         epoch_loss, step = 0, 0
@@ -635,31 +635,31 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                 inputs=adc
                 
             labels=labels[:,[np.int32((opt.nslices-1)/2)],:,:]
-            prost=prost[:,[np.int32((opt.nslices-1)/2)],:,:]
+            # prost=prost[:,[np.int32((opt.nslices-1)/2)],:,:]
             labels=  torch.clamp(labels,0.001,0.999)
             inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
             
             
-            trainseg=model.netSeg_A(inputs)
-            # trainseg=torch.softmax(trainseg,1)
-            # trainseg=trainseg[:,[1],:,:]
-            # print(np.shape(trainseg))
-            # print(np.shape(labels))
-            # print(np.shape(prost))
-            target=torch.cat((1.0-labels,labels),1).double()
-            loss1=seg_loss1(trainseg,target)
-            loss2=seg_loss2(trainseg,target,prost)
+            # trainseg=model.netSeg_A(inputs)
+            # # trainseg=torch.softmax(trainseg,1)
+            # # trainseg=trainseg[:,[1],:,:]
+            # # print(np.shape(trainseg))
+            # # print(np.shape(labels))
+            # # print(np.shape(prost))
+            # target=torch.cat((1.0-labels,labels),1).double()
+            # loss1=seg_loss1(trainseg,target)
+            # loss2=seg_loss2(trainseg,target,prost)
             
-            loss=loss1+loss2
-            optimizer_seg.zero_grad()
-            loss.backward()
-            optimizer_seg.step()
+            # loss=loss1+loss2
+            # optimizer_seg.zero_grad()
+            # loss.backward()
+            # optimizer_seg.step()
             
-            track_global_loss.append(loss1.item())
-            track_masked_loss.append(loss2.item())
+            # track_global_loss.append(loss1.item())
+            # track_masked_loss.append(loss2.item())
             
-            # model.set_input_sep(inputs,labels)
-            # model.optimize_parameters()
+            model.set_input_sep(inputs,labels)
+            model.optimize_parameters()
             
             
         if (epoch%opt.display_freq)==0:      
@@ -701,7 +701,8 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                                                                     model.netSeg_A,
                                                                     overlap=max(0.66,1-(1/opt.nslices)),
                                                                     mode="gaussian",
-                                                                    sigma_scale=[0.128, 0.128,0.001])
+                                                                    sigma_scale=[0.128, 0.128,0.001],
+                                                                    options=opt)
                 
                     seg = from_engine(["pred"])(val_data)
                     #print("seg length: ", len(seg))
