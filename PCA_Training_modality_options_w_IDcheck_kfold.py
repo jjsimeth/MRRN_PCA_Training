@@ -602,9 +602,30 @@ for file_entry in train_files:
 
 masked_loss_start=0.5
 masked_loss_end=1.0
-AllData,Allgroups=combine_lists_with_sources(val_files,train_files)
-#AllData,Allgroups=combine_lists_with_sources(val_files)
-#AllData,Allgroups=combine_lists_with_sources(val_files,train_files,train_files2,train_files3)
+
+# Helper to get counts of the files in the lists
+def get_counts(*file_lists):
+    return [len(files) if files else 0 for files in file_lists]
+    
+    
+# Generate Alldata and Allgroups based on train_files and val_files. Optionally use train_files2 or traing_files3
+if not train_files and not val_files:
+    print("-" * 40 + "\nERROR: No files found.\n" + "-" * 40)
+elif not train_files:
+    print(f"WARNING: Only val files found ({len(val_files)} files)")
+    AllData, Allgroups = combine_lists_with_sources(val_files)
+elif not train_files2 and not train_files3:
+    val_count, train1_count = get_counts(val_files, train_files)
+    print(f"INFO: Val: {val_count}, Train: {train1_count}")
+    AllData, Allgroups = combine_lists_with_sources(val_files, train_files)
+elif not train_files3:
+    val_count, train1_count, train2_count = get_counts(val_files, train_files, train_files2)
+    print(f"INFO: Val: {val_count}, Train: [{train1_count}, {train2_count}]}")
+    AllData, Allgroups = combine_lists_with_sources(val_files, train_files, train_files2)
+else:
+    val_count, train1_count, train2_count, train3_count = get_counts(val_files, train_files, train_files2, train_files3)
+    print(f"INFO: Val: {val_count}, Train: [{train1_count}, {train2_count}, {train3_count}]")
+    AllData, Allgroups = combine_lists_with_sources(val_files, train_files, train_files2, train_files3)
 
 k = 5
 folds = kfold_split(AllData,Allgroups,k)
