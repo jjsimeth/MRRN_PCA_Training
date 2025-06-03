@@ -620,7 +620,7 @@ elif not train_files2 and not train_files3:
     AllData, Allgroups = combine_lists_with_sources(val_files, train_files)
 elif not train_files3:
     val_count, train1_count, train2_count = get_counts(val_files, train_files, train_files2)
-    print(f"INFO: Val: {val_count}, Train: [{train1_count}, {train2_count}]}")
+    print(f"INFO: Val: {val_count}, Train: [{train1_count}, {train2_count}]")
     AllData, Allgroups = combine_lists_with_sources(val_files, train_files, train_files2)
 else:
     val_count, train1_count, train2_count, train3_count = get_counts(val_files, train_files, train_files2, train_files3)
