@@ -106,9 +106,18 @@ def combine_lists_with_sources(*lists):
 def extract_id(sample):
     filename = sample['img']  # Assuming filename is the 4th item in the tuple
     #print(filename)
-    match = re.search(r'_P(\d{3})', filename)
+    # Try the NKI - MARPROC### format first
+    match = re.search(r'MARPROC(\d{3})', filename)
+    if match:
+        return match.group(1)
     
-    return match.group(1) if match else None
+    # try the MSKCC - _P### format
+    match = re.search(r'_P(\d{3})', filename)
+    if match:
+        return match.group(1)
+    
+    # If neither pattern matches, return None
+    return None
 
 def kfold_split(dataset,stratification_data=None, k=5, seed=42):
     random.seed(seed)
@@ -402,7 +411,7 @@ train_transforms = Compose(
                 RandSimulateLowResolutiond(keys=["img"], prob=0.25),
                 RandGaussianNoised(keys=["img"], prob=0.25),
                 RandGaussianSmoothd(keys=["img"], prob=0.25),
-                RandGaussianSharpend(keys=["t2w"], prob=0.25),
+                RandGaussianSharpend(keys=["img"], prob=0.25),
                 ]),
                     
             OneOf(transforms=[
@@ -492,42 +501,99 @@ post_transforms = Compose([
     ])
 
 
-datadir= r'/lila/data/deasy/Josiah_data/Prostate/nii_data'   
+# ----------------------------------------------
+# NKI paths 
 
-adcpath = os.path.join(datadir,'MR_LINAC50_NII','Images','ADC')
-t2path = os.path.join(datadir,'MR_LINAC50_NII','Images','T2w')
-trainpath_masks = os.path.join(datadir,'MR_LINAC50_NII','Masks','DIL')
-trainpath_prostate_masks = os.path.join(datadir,'MR_LINAC50_NII','Masks','Prostate')
+# Define NKI implementation paths 
+old_impath = os.path.join(root_dir,'training_data_v3')
+old_valpath = os.path.join(root_dir,'validation_data_v3')
 
+# Function to check if a path exists
+def path_exists(path):
+    return os.path.exists(path) and os.path.isdir(path)
 
-adcpath2 = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Images','ADC')
-t2path2 = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Images','T2w')
-trainpath2_masks = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Masks','DIL')
-trainpath3_masks = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Masks','DIL_T2w')
-trainpath2_prostate_masks = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Masks','Prostate_JJS')
+# Helper function to collect files matching patterns in a given directory
+def collect_files(base_path, patterns):
+    files = []
+    for pattern in patterns:
+        files.extend(glob(os.path.join(base_path, pattern)))
+    return sorted(files)
 
-valpath_adcpath = os.path.join(datadir,'MR_LINAC10_NII','Images','ADC')
-valpath_t2path = os.path.join(datadir,'MR_LINAC10_NII','Images','T2w')
-valpath_masks = os.path.join(datadir,'MR_LINAC10_NII','Masks','GTV')
-valpath_prostate_masks = os.path.join(datadir,'MR_LINAC10_NII','Masks','Prostate')
+# File patterns for different modalities
+patterns = {
+    "adc": ('ProstateX*_ep2d_diff_*.nii.gz', 'MSK_MR_*_ADC.nii.gz', '*_ivim_adc.nii'),
+    "seg": ('ProstateX*Finding*t2_tse_tra*_ROI.nii.gz', 'MSK_MR_*_GTV.nii.gz', '*_LES*.nii'),
+    "t2w": ('ProstateX*_t2_tse*.nii.gz', 'MSK_MR_*T2w.nii.gz', '*_tt2.nii'),
+    "prostate": ('*_pros_bas.nii', 'mskpros.nii')
+}
 
+# Initialize train_files and val_files
+train_files = []
+val_files = []
 
+# Check if NKI paths exist
+if path_exists(old_impath) and path_exists(old_valpath):
+    # Collect files from training path
+    images = collect_files(old_impath, patterns["adc"])
+    segs = collect_files(old_impath, patterns["seg"])
+    images_t2w = collect_files(old_impath, patterns["t2w"])
+    pros_segs = collect_files(old_impath, patterns["prostate"])
+    
+    # Collect files from validation path
+    val_images = collect_files(old_valpath, patterns["adc"])
+    val_segs = collect_files(old_valpath, patterns["seg"])
+    val_images_t2w = collect_files(old_valpath, patterns["t2w"])
+    val_pros_segs = collect_files(old_valpath, patterns["prostate"])
+    
+    # Create dictionaries for training and validation files
+    if images and segs and images_t2w and pros_segs:
+        train_files = [{"img": img, "seg": seg, "t2w": t2w, "prost": pros} 
+                      for img, seg, t2w, pros in zip(images, segs, images_t2w, pros_segs)]
+    
+    if val_images and val_segs and val_images_t2w and val_pros_segs:
+        val_files = [{"img": img, "seg": seg, "t2w": t2w, "prost": pros} 
+                    for img, seg, t2w, pros in zip(val_images, val_segs, val_images_t2w, val_pros_segs)]
 
-
-trainfolders = [adcpath, trainpath_masks,t2path,trainpath_prostate_masks]  # Replace with actual paths
-trainfolders2 = [adcpath2, trainpath2_masks,t2path2,trainpath2_prostate_masks]  # Replace with actual paths
-trainfolders3 =  [adcpath2, trainpath3_masks,t2path2,trainpath2_prostate_masks]  # Replace with actual paths
-
-valfolders = [valpath_adcpath, valpath_masks,valpath_t2path,valpath_prostate_masks]  # Replace with actual paths
-custom_names = ["img", "seg", "t2w","prost"]
-train_files = find_common_files(trainfolders, custom_names,pattern=r'.*P(\d+)_S(\d+).*\.nii\.gz')
-train_files2 = find_common_files(trainfolders2, custom_names,pattern=r'.*P(\d+)_.*\.nii\.gz')
-train_files3 = find_common_files(trainfolders3, custom_names,pattern=r'.*P(\d+)_.*\.nii\.gz')
-
-val_files = find_common_files(valfolders, custom_names,pattern=r'.*P(\d+)_S(\d+).*\.nii\.gz')
-#val_files = find_common_files(valfolders, custom_names,pattern=r'.*P(\d+)_S1.*\.nii\.gz')
-
-# train_files=train_files+train_files2+train_files3
+# ----------------------------------------------
+# MSKCC paths 
+else:    
+  # Paths from mskcc
+  datadir= r'/lila/data/deasy/Josiah_data/Prostate/nii_data'
+  
+  adcpath = os.path.join(datadir,'MR_LINAC50_NII','Images','ADC')
+  t2path = os.path.join(datadir,'MR_LINAC50_NII','Images','T2w')
+  trainpath_masks = os.path.join(datadir,'MR_LINAC50_NII','Masks','DIL')
+  trainpath_prostate_masks = os.path.join(datadir,'MR_LINAC50_NII','Masks','Prostate')
+  
+  
+  adcpath2 = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Images','ADC')
+  t2path2 = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Images','T2w')
+  trainpath2_masks = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Masks','DIL')
+  trainpath3_masks = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Masks','DIL_T2w')
+  trainpath2_prostate_masks = os.path.join(datadir,'MR_SIM20_DIRVAR_NII','Masks','Prostate_JJS')
+  
+  valpath_adcpath = os.path.join(datadir,'MR_LINAC10_NII','Images','ADC')
+  valpath_t2path = os.path.join(datadir,'MR_LINAC10_NII','Images','T2w')
+  valpath_masks = os.path.join(datadir,'MR_LINAC10_NII','Masks','GTV')
+  valpath_prostate_masks = os.path.join(datadir,'MR_LINAC10_NII','Masks','Prostate')
+  
+  
+  
+  
+  trainfolders = [adcpath, trainpath_masks,t2path,trainpath_prostate_masks]  # Replace with actual paths
+  trainfolders2 = [adcpath2, trainpath2_masks,t2path2,trainpath2_prostate_masks]  # Replace with actual paths
+  trainfolders3 =  [adcpath2, trainpath3_masks,t2path2,trainpath2_prostate_masks]  # Replace with actual paths
+  
+  valfolders = [valpath_adcpath, valpath_masks,valpath_t2path,valpath_prostate_masks]  # Replace with actual paths
+  custom_names = ["img", "seg", "t2w","prost"]
+  train_files = find_common_files(trainfolders, custom_names,pattern=r'.*P(\d+)_S(\d+).*\.nii\.gz')
+  train_files2 = find_common_files(trainfolders2, custom_names,pattern=r'.*P(\d+)_.*\.nii\.gz')
+  train_files3 = find_common_files(trainfolders3, custom_names,pattern=r'.*P(\d+)_.*\.nii\.gz')
+  
+  val_files = find_common_files(valfolders, custom_names,pattern=r'.*P(\d+)_S(\d+).*\.nii\.gz')
+  
+  
+  train_files=train_files+train_files2+train_files3
 
 print("Matching files:")
 for file_entry in train_files:
@@ -536,8 +602,9 @@ for file_entry in train_files:
 
 masked_loss_start=0.5
 masked_loss_end=1.0
-AllData,Allgroups=combine_lists_with_sources(val_files,train_files,train_files2,train_files3)
+AllData,Allgroups=combine_lists_with_sources(val_files,train_files)
 #AllData,Allgroups=combine_lists_with_sources(val_files)
+#AllData,Allgroups=combine_lists_with_sources(val_files,train_files,train_files2,train_files3)
 
 k = 5
 folds = kfold_split(AllData,Allgroups,k)
@@ -579,7 +646,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
         batch_size=opt.batchSize,
         num_workers=4,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=True,
+        persistent_workers=False,
         drop_last=True,
         shuffle=True
     )
@@ -588,7 +655,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
         batch_size=1,
         num_workers=4,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=True,
+        persistent_workers=False,
         drop_last=True
     )
     
