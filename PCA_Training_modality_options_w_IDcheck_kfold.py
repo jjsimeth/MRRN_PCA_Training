@@ -553,6 +553,10 @@ if path_exists(old_impath) and path_exists(old_valpath):
     if val_images and val_segs and val_images_t2w and val_pros_segs:
         val_files = [{"img": img, "seg": seg, "t2w": t2w, "prost": pros} 
                     for img, seg, t2w, pros in zip(val_images, val_segs, val_images_t2w, val_pros_segs)]
+                    
+#Init empty train_files2 and 3 for later steps related to MSK file matching
+train_files2 = None
+train_files3 = None
 
 # ----------------------------------------------
 # MSKCC paths 
@@ -603,11 +607,12 @@ for file_entry in train_files:
 masked_loss_start=0.5
 masked_loss_end=1.0
 
+
 # Helper to get counts of the files in the lists
 def get_counts(*file_lists):
     return [len(files) if files else 0 for files in file_lists]
-    
-    
+
+
 # Generate Alldata and Allgroups based on train_files and val_files. Optionally use train_files2 or traing_files3
 if not train_files and not val_files:
     print("-" * 40 + "\nERROR: No files found.\n" + "-" * 40)
