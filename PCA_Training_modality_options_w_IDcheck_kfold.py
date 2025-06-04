@@ -40,7 +40,7 @@ from PCA_DIL_inference_utils import sliding_window_inference
 
 
 
-
+import datetime
 # from pathlib import Path
 from glob import glob
 
@@ -707,6 +707,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
         #     optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr*(1.0-(epoch-opt.niter_decay+opt.niter)/(num_epochs)))
         
         #lr=model.get_curr_lr()
+        best_epoch = 0
         epoch_loss, step = 0, 0
         track_global_loss=[]
         track_masked_loss=[]
@@ -763,6 +764,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
         if (epoch%opt.display_freq)==0:
             print("-" * 10)
             print(f"epoch {epoch}/{num_epochs}")
+            print(f"datetime: {datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}")
             with torch.no_grad(): # no grade calculation 
                 dice_2D=[]
                 smooth=1
@@ -817,15 +819,17 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                     
                     intersection = np.sum(seg_flt * (gt_flt > 0))
                     dice_2D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
-                    print('  DSC:  %.2f' % dice_2D_temp)
                     dice_2D.append(dice_2D_temp)
                     
                     
                     
                     
-                    
+                [print('  DSC:  %.2f' % dice_val) for dice_val in dice_2D]
+                # Get recall by counting all the cases of dice > 0.1 and dividing by all cases
+                recall = np.sum(np.array(dice_2D) > 0.1) / len(np.array(dice_2D))
                 dice_2D=np.average(dice_2D)
                 print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
+                print('best epoch %i' % best_epoch, 'Recall  %.2f' % recall)
                 
                 fd_results.write(str(np.average(track_global_loss))+' ,'+str(np.average(track_masked_loss))+' ,'+str(dice_2D) + '\n')
                 fd_results.flush()  
@@ -835,6 +839,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                         print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
                         model.save('AVG_best_finetuned_fold%i' %jk)
                         best_dice = dice_2D
+                        best_epoch = epoch
                         im_iter=0
                         # for vol_data in val_loader:
                         #     im_iter += 1
