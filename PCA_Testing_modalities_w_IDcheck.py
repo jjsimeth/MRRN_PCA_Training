@@ -284,7 +284,7 @@ DIM_in=np.array([128,128,opt.nslices]) # 128x128 5 Slices
 
 if opt.modality.lower()=='adc':
     nmodalities=1
-elif (opt.modality.lower()=='t2+adc') or (opt.modality.lower()=='adc+t2'):
+elif ('t2' in opt.modality.lower()) and ('adc' in opt.modality.lower()):
     nmodalities=2
 elif opt.modality.lower()=='t2':
     nmodalities=1
@@ -600,8 +600,11 @@ with torch.no_grad(): # no grade calculation
         
         if opt.modality.lower()=='adc':
             val_inputs=adc
-        elif (opt.modality.lower()=='t2+adc') or (opt.modality.lower()=='adc+t2'):
+        elif ('t2' in opt.modality.lower()) and ('adc' in opt.modality.lower()) and ('reverse' in opt.modality.lower()):
+            val_inputs=torch.cat((t2w,adc),dim=1)    
+        elif ('t2' in opt.modality.lower()) and ('adc' in opt.modality.lower()):
             val_inputs=torch.cat((adc,t2w),dim=1)
+        
         elif opt.modality.lower()=='t2':
             val_inputs=t2w
         else:
@@ -685,8 +688,8 @@ with torch.no_grad(): # no grade calculation
             #print('seg sum:', np.sum(seg) )
             #print('seg max:', np.max(seg) )
             
-            seg[seg >= 0.5]=1.0
-            seg[seg < 0.5]=0.0
+            seg[seg >= opt.seg_threshold]=1.0
+            seg[seg < opt.seg_threshold]=0.0
             
             prostate[prostate>0.5]=1.0
             

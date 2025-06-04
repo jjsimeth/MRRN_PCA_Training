@@ -548,7 +548,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
     if not os.path.exists(dest_path):
         os.makedirs(dest_path)
     fd_results = open(wt_path, 'w')
-    fd_results.write('global train loss, masked train loss, val accuracy, \n')
+    fd_results.write('global train loss, val accuracy, \n')
 
     
     
@@ -634,7 +634,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                 print('No modality option, assuming ADC...?')
                 inputs=adc
                 
-            labels=labels[:,[np.int32((opt.nslices-1)/2)],:,:]
+            labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
             # prost=prost[:,[np.int32((opt.nslices-1)/2)],:,:]
             labels=  torch.clamp(labels,0.001,0.999)
             inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
@@ -655,16 +655,16 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
             # loss.backward()
             # optimizer_seg.step()
             
-            # track_global_loss.append(loss1.item())
+            
             # track_masked_loss.append(loss2.item())
             
             model.set_input_sep(inputs,labels)
             model.optimize_parameters()
+            track_global_loss.append(model.get_current_errors()['Seg_loss'].item())
             
             
         if (epoch%opt.display_freq)==0:      
-                            #errors = model.get_current_errors()['Seg_loss']
-                            print ('    Global loss: %0.2f   Masked Loss: %0.2f' %(np.average(track_global_loss),np.average(track_masked_loss))) 
+                            print ('    training loss: %0.2f' %(np.average(track_global_loss))) 
             
             
         if (epoch%opt.display_freq)==0:
@@ -684,8 +684,9 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                     
                     if opt.modality.lower()=='adc':
                         val_inputs=adc
-                    elif (opt.modality.lower()=='t2+adc') or (opt.modality.lower()=='adc+t2'):
+                    elif ('t2' in opt.modality.lower()) and ('adc' in opt.modality.lower()):
                         val_inputs=torch.cat((adc,t2w),dim=1)
+                    
                     elif opt.modality.lower()=='t2':
                         val_inputs=t2w
                     else:
@@ -734,7 +735,7 @@ for jk, (fold_train_files, fold_val_files) in enumerate(folds):
                 dice_2D=np.average(dice_2D)
                 print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
                 
-                fd_results.write(str(np.average(track_global_loss))+' ,'+str(np.average(track_masked_loss))+' ,'+str(dice_2D) + '\n')
+                fd_results.write(str(np.average(track_global_loss))+' ,'+str(dice_2D) + '\n')
                 fd_results.flush()  
                 
                         
