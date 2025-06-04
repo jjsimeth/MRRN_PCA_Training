@@ -554,9 +554,9 @@ if path_exists(old_impath) and path_exists(old_valpath):
         val_files = [{"img": img, "seg": seg, "t2w": t2w, "prost": pros} 
                     for img, seg, t2w, pros in zip(val_images, val_segs, val_images_t2w, val_pros_segs)]
                     
-#Init empty train_files2 and 3 for later steps related to MSK file matching
-train_files2 = None
-train_files3 = None
+    #Init empty train_files2 and 3 for later steps related to MSK file matching
+    train_files2 = None
+    train_files3 = None
 
 # ----------------------------------------------
 # MSKCC paths 
