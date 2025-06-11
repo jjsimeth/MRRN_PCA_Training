@@ -21,7 +21,11 @@ class TrainOptions(BaseOptions):
         self.parser.add_argument('--optimizer', type=str, default='AdamW', help='which epoch to load? set to latest to use latest cached model')
         self.parser.add_argument('--loss', type=str, default='dice', help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
         self.parser.add_argument('--isTrain', type=int, default=True, help='Loss to use? Default is combined dice and cross-entropy loss: choices are: dice, tversky, focal, soft_dsc')
-
+       
+        self.parser.add_argument('--fold', type=int,nargs="+", default=None, help='which folds to train')
+       
+        
+        
 
         self.parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
         self.parser.add_argument('--data_folder', type=str, default='validation_data', help='folder for data to test.')
@@ -97,7 +101,7 @@ class TrainOptions(BaseOptions):
         #self.parser.add_argument('--T_mult', type=int, default=2, help='learning rate policy: lambda|step|plateau')
         #self.parser.add_argument('--T_0', type=int, default=5000, help='learning rate policy: lambda|step|plateau')
         self.parser.add_argument('--modality', type=str, default='ADC', help='modality to use')
-        
+        self.parser.add_argument('--seg_threshold', type=float, default=0.5, help='segmentation threshold (prediction>seg_threshold == TRUE')
         
         # self.parser.add_argument('--lr_decay_iters', type=int, default=30, help='multiply by a gamma every lr_decay_iters iterations')
         # self.parser.add_argument('--mri_D', type=int, default=1, help='use D to filter MRI')

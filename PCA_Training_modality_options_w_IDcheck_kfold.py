@@ -542,266 +542,268 @@ AllData,Allgroups=combine_lists_with_sources(val_files,train_files,train_files2,
 k = 5
 folds = kfold_split(AllData,Allgroups,k)
 
+    
 for jk, (fold_train_files, fold_val_files) in enumerate(folds):
     
-    wt_path= os.path.join(root_dir,opt.name,'ct_seg_val_loss_fold%i.csv' %jk)
-    if not os.path.exists(dest_path):
-        os.makedirs(dest_path)
-    fd_results = open(wt_path, 'w')
-    fd_results.write('global train loss, val accuracy, \n')
-
+    if jk in opt.fold:
+        wt_path= os.path.join(root_dir,opt.name,'ct_seg_val_loss_fold%i.csv' %jk)
+        if not os.path.exists(dest_path):
+            os.makedirs(dest_path)
+        fd_results = open(wt_path, 'w')
+        fd_results.write('global train loss, val accuracy, \n')
     
-    
-    model = create_model(opt) 
-    optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr)
-    # train_ds = monai.data.Dataset(data=train_files, transform=train_transforms)
-    # val_ds = monai.data.Dataset(data=val_files, transform=val_transforms)
-    
-    train_ds = monai.data.CacheDataset(
-                data=fold_train_files,
-                transform=train_transforms,
-                cache_num= 200,#400,#1200,#400,#200,#args.cache_num,# 250,
-                cache_rate=1.0,
-                num_workers=4,
-            )
-    val_ds = monai.data.CacheDataset(
-                data=fold_val_files,
-                transform=val_transforms,
-                cache_num= 100,#400,#1200,#400,#200,#args.cache_num,# 250,
-                cache_rate=1.0,
-                num_workers=4,
-            )
-    
-    
-    
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=opt.batchSize,
-        num_workers=4,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True,
-        drop_last=True,
-        shuffle=True
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=1,
-        num_workers=4,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True,
-        drop_last=True
-    )
-    
-    
-    check_data = monai.utils.misc.first(train_loader)
-    print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
-    
-    sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_t2w.nii.gz'))
-    sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_adc.nii.gz'))
-    sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_SEG.nii.gz'))
-    sitk.WriteImage(sitk.GetImageFromArray(check_data["prost"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_prost.nii.gz'))
-    
-    
-    num_epochs=opt.niter+opt.niter_decay
-    epoch_loss_values = []
-    best_dice=0
-    mixup_ab=opt.mixup_betadist
-    #optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr)
-    for epoch in range(num_epochs+1):
         
         
-        # if epoch>=opt.niter:
-        #     optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr*(1.0-(epoch-opt.niter_decay+opt.niter)/(num_epochs)))
+        model = create_model(opt) 
+        optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr)
+        # train_ds = monai.data.Dataset(data=train_files, transform=train_transforms)
+        # val_ds = monai.data.Dataset(data=val_files, transform=val_transforms)
         
-        #lr=model.get_curr_lr()
-        epoch_loss, step = 0, 0
-        track_global_loss=[]
-        track_masked_loss=[]
-        for batch_data in train_loader:
-            step += 1
-    
-            adc, labels, t2w, prost = batch_data["img"].to(device), batch_data["seg"].to(device), batch_data["t2w"].to(device), batch_data["prost"].to(device)
-    
-            #inputs=torch.cat((adc,t2w),dim=1)
+        train_ds = monai.data.CacheDataset(
+                    data=fold_train_files,
+                    transform=train_transforms,
+                    cache_num= 200,#400,#1200,#400,#200,#args.cache_num,# 250,
+                    cache_rate=1.0,
+                    num_workers=4,
+                )
+        val_ds = monai.data.CacheDataset(
+                    data=fold_val_files,
+                    transform=val_transforms,
+                    cache_num= 100,#400,#1200,#400,#200,#args.cache_num,# 250,
+                    cache_rate=1.0,
+                    num_workers=4,
+                )
+        
+        
+        
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=opt.batchSize,
+            num_workers=4,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=True,
+            drop_last=True,
+            shuffle=True
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=1,
+            num_workers=4,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=True,
+            drop_last=True
+        )
+        
+        
+        check_data = monai.utils.misc.first(train_loader)
+        print("first patch's shape: ", check_data["img"].shape, check_data["seg"].shape, check_data["t2w"].shape)
+        
+        sitk.WriteImage(sitk.GetImageFromArray(check_data["t2w"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_t2w.nii.gz'))
+        sitk.WriteImage(sitk.GetImageFromArray(check_data["img"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_adc.nii.gz'))
+        sitk.WriteImage(sitk.GetImageFromArray(check_data["seg"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_SEG.nii.gz'))
+        sitk.WriteImage(sitk.GetImageFromArray(check_data["prost"].cpu()[0,:,:,:]),  os.path.join(dest_path,'TRAINING_DEBUG_prost.nii.gz'))
+        
+        
+        num_epochs=opt.niter+opt.niter_decay
+        epoch_loss_values = []
+        best_dice=0
+        mixup_ab=opt.mixup_betadist
+        #optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr)
+        for epoch in range(num_epochs+1):
             
-            if opt.modality.lower()=='adc':
-                inputs=adc
-            elif (opt.modality.lower()=='t2+adc') or (opt.modality.lower()=='adc+t2'):
-                inputs=torch.cat((adc,t2w),dim=1)
-            elif opt.modality.lower()=='t2':
-                inputs=t2w
-            else:
-                print('No modality option, assuming ADC...?')
-                inputs=adc
+            
+            # if epoch>=opt.niter:
+            #     optimizer_seg = torch.optim.Adam(model.netSeg_A.parameters(), lr=opt.lr*(1.0-(epoch-opt.niter_decay+opt.niter)/(num_epochs)))
+            
+            #lr=model.get_curr_lr()
+            epoch_loss, step = 0, 0
+            track_global_loss=[]
+            track_masked_loss=[]
+            for batch_data in train_loader:
+                step += 1
+        
+                adc, labels, t2w, prost = batch_data["img"].to(device), batch_data["seg"].to(device), batch_data["t2w"].to(device), batch_data["prost"].to(device)
+        
+                #inputs=torch.cat((adc,t2w),dim=1)
                 
-            labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
-            # prost=prost[:,[np.int32((opt.nslices-1)/2)],:,:]
-            labels=  torch.clamp(labels,0.001,0.999)
-            inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
-            
-            
-            # trainseg=model.netSeg_A(inputs)
-            # # trainseg=torch.softmax(trainseg,1)
-            # # trainseg=trainseg[:,[1],:,:]
-            # # print(np.shape(trainseg))
-            # # print(np.shape(labels))
-            # # print(np.shape(prost))
-            # target=torch.cat((1.0-labels,labels),1).double()
-            # loss1=seg_loss1(trainseg,target)
-            # loss2=seg_loss2(trainseg,target,prost)
-            
-            # loss=loss1+loss2
-            # optimizer_seg.zero_grad()
-            # loss.backward()
-            # optimizer_seg.step()
-            
-            
-            # track_masked_loss.append(loss2.item())
-            
-            model.set_input_sep(inputs,labels)
-            model.optimize_parameters()
-            track_global_loss.append(model.get_current_errors()['Seg_loss'].item())
-            
-            
-        if (epoch%opt.display_freq)==0:      
-                            print ('    training loss: %0.2f' %(np.average(track_global_loss))) 
-            
-            
-        if (epoch%opt.display_freq)==0:
-            print("-" * 10)
-            print(f"epoch {epoch}/{num_epochs}")
-            with torch.no_grad(): # no grade calculation 
-                dice_2D=[]
-                smooth=1
-                step=0
-                for val_data in val_loader:
-                    step += 1
-                    adc, label_val,t2w,prost = val_data["img"].to(device), val_data["seg"].to(device), val_data["t2w"].to(device), val_data["prost"].to(device)
-                    label_val_vol=label_val
-                    val_inputs=torch.cat((adc,t2w),dim=1)
-                    val_inputs=adc
-                   
+                if opt.modality.lower()=='adc':
+                    inputs=adc
+                elif (opt.modality.lower()=='t2+adc') or (opt.modality.lower()=='adc+t2'):
+                    inputs=torch.cat((adc,t2w),dim=1)
+                elif opt.modality.lower()=='t2':
+                    inputs=t2w
+                else:
+                    print('No modality option, assuming ADC...?')
+                    inputs=adc
                     
-                    if opt.modality.lower()=='adc':
-                        val_inputs=adc
-                    elif ('t2' in opt.modality.lower()) and ('adc' in opt.modality.lower()):
+                labels=labels[:,np.int32((opt.nslices-1)/2),:,:]
+                # prost=prost[:,[np.int32((opt.nslices-1)/2)],:,:]
+                labels=  torch.clamp(labels,0.001,0.999)
+                inputs, labels = mixup(inputs, labels, np.random.beta(mixup_ab, mixup_ab))
+                
+                
+                # trainseg=model.netSeg_A(inputs)
+                # # trainseg=torch.softmax(trainseg,1)
+                # # trainseg=trainseg[:,[1],:,:]
+                # # print(np.shape(trainseg))
+                # # print(np.shape(labels))
+                # # print(np.shape(prost))
+                # target=torch.cat((1.0-labels,labels),1).double()
+                # loss1=seg_loss1(trainseg,target)
+                # loss2=seg_loss2(trainseg,target,prost)
+                
+                # loss=loss1+loss2
+                # optimizer_seg.zero_grad()
+                # loss.backward()
+                # optimizer_seg.step()
+                
+                
+                # track_masked_loss.append(loss2.item())
+                
+                model.set_input_sep(inputs,labels)
+                model.optimize_parameters()
+                track_global_loss.append(model.get_current_errors()['Seg_loss'].item())
+                
+                
+            if (epoch%opt.display_freq)==0:      
+                                print ('    training loss: %0.2f' %(np.average(track_global_loss))) 
+                
+                
+            if (epoch%opt.display_freq)==0:
+                print("-" * 10)
+                print(f"epoch {epoch}/{num_epochs}")
+                with torch.no_grad(): # no grade calculation 
+                    dice_2D=[]
+                    smooth=1
+                    step=0
+                    for val_data in val_loader:
+                        step += 1
+                        adc, label_val,t2w,prost = val_data["img"].to(device), val_data["seg"].to(device), val_data["t2w"].to(device), val_data["prost"].to(device)
+                        label_val_vol=label_val
                         val_inputs=torch.cat((adc,t2w),dim=1)
-                    
-                    elif opt.modality.lower()=='t2':
-                        val_inputs=t2w
-                    else:
-                        print('No modality option, assuming ADC...?')
-                        val_inputs=adc    
-                    
-                    with autocast(enabled=True):
-                        #pass model segmentor and region info
-                        #input, roi size, sw batch size, model, overlap (0.5)
-                        val_data["pred"] = sliding_window_inference(val_inputs,
-                                                                    (128, 128, opt.nslices),
-                                                                    4,
-                                                                    model.netSeg_A,
-                                                                    overlap=max(0.66,1-(1/opt.nslices)),
-                                                                    mode="gaussian",
-                                                                    sigma_scale=[0.128, 0.128,0.001],
-                                                                    options=opt)
-                
-                    seg = from_engine(["pred"])(val_data)
-                    #print("seg length: ", len(seg))
-                    seg = seg[0]
-                    #print("seg shape: ", np.shape(seg))
-                    seg = np.array(seg)
-                    seg=np.squeeze(seg)
-                    prost=np.squeeze(prost)
-                    seg=seg*prost
-                    seg[seg >= 0.5]=1.0
-                    seg[seg < 0.5]=0.0
-                    
-                    seg_temp=np.array(seg)
-                    gt_temp=np.array(label_val_vol.cpu())
-        
-                    seg_flt=seg_temp.flatten()
-                    gt_flt=gt_temp.flatten()
-                    
-                    
-                    intersection = np.sum(seg_flt * (gt_flt > 0))
-                    dice_2D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
-                    print('  DSC:  %.2f' % dice_2D_temp)
-                    dice_2D.append(dice_2D_temp)
-                    
-                    
-                    
-                    
-                    
-                dice_2D=np.average(dice_2D)
-                print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
-                
-                fd_results.write(str(np.average(track_global_loss))+' ,'+str(dice_2D) + '\n')
-                fd_results.flush()  
-                
+                        val_inputs=adc
+                       
                         
-                if dice_2D>best_dice:
-                        print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
-                        model.save('AVG_best_finetuned_fold%i' %jk)
-                        best_dice = dice_2D
-                        im_iter=0
-                        # for vol_data in val_loader:
-                        #     im_iter += 1
-                        #     adc, label_val,t2w,prost = vol_data["img"].to(device), vol_data["seg"].to(device), vol_data["t2w"].to(device), vol_data["prost"].to(device)
+                        if opt.modality.lower()=='adc':
+                            val_inputs=adc
+                        elif ('t2' in opt.modality.lower()) and ('adc' in opt.modality.lower()):
+                            val_inputs=torch.cat((adc,t2w),dim=1)
+                        
+                        elif opt.modality.lower()=='t2':
+                            val_inputs=t2w
+                        else:
+                            print('No modality option, assuming ADC...?')
+                            val_inputs=adc    
+                        
+                        with autocast(enabled=True):
+                            #pass model segmentor and region info
+                            #input, roi size, sw batch size, model, overlap (0.5)
+                            val_data["pred"] = sliding_window_inference(val_inputs,
+                                                                        (128, 128, opt.nslices),
+                                                                        4,
+                                                                        model.netSeg_A,
+                                                                        overlap=max(0.66,1-(1/opt.nslices)),
+                                                                        mode="gaussian",
+                                                                        sigma_scale=[0.128, 0.128,0.001],
+                                                                        options=opt)
+                    
+                        seg = from_engine(["pred"])(val_data)
+                        #print("seg length: ", len(seg))
+                        seg = seg[0]
+                        #print("seg shape: ", np.shape(seg))
+                        seg = np.array(seg)
+                        seg=np.squeeze(seg)
+                        prost=np.squeeze(prost)
+                        seg=seg*prost
+                        seg[seg >= 0.5]=1.0
+                        seg[seg < 0.5]=0.0
+                        
+                        seg_temp=np.array(seg)
+                        gt_temp=np.array(label_val_vol.cpu())
+            
+                        seg_flt=seg_temp.flatten()
+                        gt_flt=gt_temp.flatten()
+                        
+                        
+                        intersection = np.sum(seg_flt * (gt_flt > 0))
+                        dice_2D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
+                        print('  DSC:  %.2f' % dice_2D_temp)
+                        dice_2D.append(dice_2D_temp)
+                        
+                        
+                        
+                        
+                        
+                    dice_2D=np.average(dice_2D)
+                    print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
+                    
+                    fd_results.write(str(np.average(track_global_loss))+' ,'+str(dice_2D) + '\n')
+                    fd_results.flush()  
+                    
                             
-                        #     img_name=adc.meta['filename_or_obj'][0].split('/')[-1]
-                        #     print(img_name)
-                            
-                        #     label_val_vol=label_val
-                        #     #if torch.sum(label_val)>0:
-                        #     # adc=scale_ADC(adc)
-                            
-                        #     #val_inputs=torch.cat((adc,t2w),dim=1)
-                        #     val_inputs=adc
-                            
-                        #     with autocast(enabled=True):
-                        #         #pass model segmentor and region info
-                        #         #input, roi size, sw batch size, model, overlap (0.5)
-                        #         vol_data["pred"] = sliding_window_inference(val_inputs,
-                        #                                                     (128, 128, opt.nslices),
-                        #                                                     1,
-                        #                                                     model.netSeg_A,
-                        #                                                     overlap=0.66,
-                        #                                                     mode="gaussian",
-                        #                                                     sigma_scale=[0.128, 0.128,0.01])
-                            
-                            
-                            
-                        #     seg = from_engine(["pred"])(vol_data)
-                        #     #print("seg length: ", len(seg))
-                        #     seg = seg[0]
-                        #     #print("seg shape: ", np.shape(seg))
-                        #     seg = np.array(seg)
-                        #     seg=np.squeeze(seg)
-                        #     seg[seg >= 0.5]=1.0
-                        #     seg[seg < 0.5]=0.0
-                            
-                        #     sitk.WriteImage(sitk.GetImageFromArray(prost.cpu()), os.path.join(results_path,'val%i_prost.nii.gz' % im_iter))
-                        #     sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), os.path.join(results_path,'val%i_t2w.nii.gz' % im_iter))
-                        #     sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()),  os.path.join(results_path,'val%i_adc.nii.gz' % im_iter))
-                        #     sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()),  os.path.join(results_path,'val%i_gtv.nii.gz' % im_iter))
-                        #     sitk.WriteImage(sitk.GetImageFromArray(seg),  os.path.join(results_path,'val%i_seg.nii.gz' % im_iter))
-                            
-                        #     vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
-                        #     seg_out= from_engine(["pred"])(vol_data)[0]
-                        #     seg_out = np.array(seg_out)
-                        #     seg_out=np.squeeze(seg_out)
-                        #     seg_out[seg_out >= 0.5]=1.0
-                        #     seg_out[seg_out < 0.5]=0.0
-                        #     seg_out = np.transpose(seg_out, (2, 1, 0))
-                            
-                            
-                        #     cur_rd_path=os.path.join(valpath_adcpath,img_name)
-                        #     im_obj = sitk.ReadImage(cur_rd_path)
-                        #     seg_out = sitk.GetImageFromArray(seg_out)
-                        #     seg_out = copy_info(im_obj, seg_out)
-                        #     sitk.WriteImage(seg_out,  os.path.join(seg_path,'seg_%s' % img_name))
-    
-    
-    
-        # if lr>0:
-        #         model.update_learning_rate()
+                    if dice_2D>best_dice:
+                            print ('saving for Dice, %.2f' % dice_2D, ' > %.2f' % best_dice) 
+                            model.save('AVG_best_finetuned_fold%i' %jk)
+                            best_dice = dice_2D
+                            im_iter=0
+                            # for vol_data in val_loader:
+                            #     im_iter += 1
+                            #     adc, label_val,t2w,prost = vol_data["img"].to(device), vol_data["seg"].to(device), vol_data["t2w"].to(device), vol_data["prost"].to(device)
+                                
+                            #     img_name=adc.meta['filename_or_obj'][0].split('/')[-1]
+                            #     print(img_name)
+                                
+                            #     label_val_vol=label_val
+                            #     #if torch.sum(label_val)>0:
+                            #     # adc=scale_ADC(adc)
+                                
+                            #     #val_inputs=torch.cat((adc,t2w),dim=1)
+                            #     val_inputs=adc
+                                
+                            #     with autocast(enabled=True):
+                            #         #pass model segmentor and region info
+                            #         #input, roi size, sw batch size, model, overlap (0.5)
+                            #         vol_data["pred"] = sliding_window_inference(val_inputs,
+                            #                                                     (128, 128, opt.nslices),
+                            #                                                     1,
+                            #                                                     model.netSeg_A,
+                            #                                                     overlap=0.66,
+                            #                                                     mode="gaussian",
+                            #                                                     sigma_scale=[0.128, 0.128,0.01])
+                                
+                                
+                                
+                            #     seg = from_engine(["pred"])(vol_data)
+                            #     #print("seg length: ", len(seg))
+                            #     seg = seg[0]
+                            #     #print("seg shape: ", np.shape(seg))
+                            #     seg = np.array(seg)
+                            #     seg=np.squeeze(seg)
+                            #     seg[seg >= 0.5]=1.0
+                            #     seg[seg < 0.5]=0.0
+                                
+                            #     sitk.WriteImage(sitk.GetImageFromArray(prost.cpu()), os.path.join(results_path,'val%i_prost.nii.gz' % im_iter))
+                            #     sitk.WriteImage(sitk.GetImageFromArray(t2w.cpu()), os.path.join(results_path,'val%i_t2w.nii.gz' % im_iter))
+                            #     sitk.WriteImage(sitk.GetImageFromArray(adc.cpu()),  os.path.join(results_path,'val%i_adc.nii.gz' % im_iter))
+                            #     sitk.WriteImage(sitk.GetImageFromArray(label_val.cpu()),  os.path.join(results_path,'val%i_gtv.nii.gz' % im_iter))
+                            #     sitk.WriteImage(sitk.GetImageFromArray(seg),  os.path.join(results_path,'val%i_seg.nii.gz' % im_iter))
+                                
+                            #     vol_data = [post_transforms(i) for i in decollate_batch(vol_data)]
+                            #     seg_out= from_engine(["pred"])(vol_data)[0]
+                            #     seg_out = np.array(seg_out)
+                            #     seg_out=np.squeeze(seg_out)
+                            #     seg_out[seg_out >= 0.5]=1.0
+                            #     seg_out[seg_out < 0.5]=0.0
+                            #     seg_out = np.transpose(seg_out, (2, 1, 0))
+                                
+                                
+                            #     cur_rd_path=os.path.join(valpath_adcpath,img_name)
+                            #     im_obj = sitk.ReadImage(cur_rd_path)
+                            #     seg_out = sitk.GetImageFromArray(seg_out)
+                            #     seg_out = copy_info(im_obj, seg_out)
+                            #     sitk.WriteImage(seg_out,  os.path.join(seg_path,'seg_%s' % img_name))
+        
+        
+        
+            # if lr>0:
+            #         model.update_learning_rate()
