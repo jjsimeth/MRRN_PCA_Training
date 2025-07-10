@@ -130,6 +130,17 @@ def copy_info(src, dst):
 
     return dst
 
+def calculate_auc(y_true, y_scores):
+    """
+    Calculate AUC using sklearn's implementation
+    """
+    
+    try:
+        return roc_auc_score(y_true, y_scores)
+    except ValueError as e:
+        # Handle cases like single class in y_true
+        return float('nan')
+
 def lesion_eval(seg,gtv,spacing_mm):
   #filter out small unconnected segs
     labeled_gtv=np.squeeze(gtv)
@@ -196,6 +207,22 @@ def lesion_eval(seg,gtv,spacing_mm):
     gt_vol=np.sum(labeled_gtv).astype(float)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0 #cm^3 #Nvoxels*(voxel dims in mm)*(10^-3 to get to cm^3)
     pred_vol=np.sum(final_pred).astype(float)*spacing_mm[0]*spacing_mm[1]*spacing_mm[2]/1000.0
     
+    # AUC calculation using original seg values (continuous scores) and binary ground truth
+    try:
+        # Flatten the arrays for AUC calculation
+        seg_flat = seg.flatten()
+        labeled_gtv_flat = labeled_gtv.flatten()
+        
+        # Check if we have both positive and negative samples
+        if len(np.unique(labeled_gtv_flat)) > 1:
+            auc = calculate_auc(labeled_gtv_flat, seg_flat)
+        else:
+            # If all samples are the same class, AUC is undefined
+            auc = float('NaN')
+    except:
+        # Handle edge cases
+        auc = float('NaN')
+    
     if hd95==float('Inf'):
         hd95=float('NaN')
         
@@ -205,7 +232,7 @@ def lesion_eval(seg,gtv,spacing_mm):
     if pred_vol==0:
         pred_vol=float('NaN')  
        
-    return  DSC, FD, hd95, gt_vol, pred_vol    
+    return  DSC, FD, hd95, gt_vol, pred_vol, auc    
         # if np.sum(labeled_seg==ilabel)<27:
         #     seg[labeled_seg==ilabel]=
 
@@ -273,7 +300,8 @@ def find_file_with_string(folder_path, target_string):
     # If no matching file is found, return None
     return None
 
-
+if not hasattr(opt, 'seg_threshold'):
+    opt.seg_threshold = 0.5
 
 mr_paths = []
 seg_paths = []
@@ -388,7 +416,8 @@ if not os.path.exists(seg_path):
 # print(val_segs)
 # print(val_images_t2w)
 # print(val_prost)
-datadir= r'/lila/data/deasy/Josiah_data/Prostate/nii_data'   
+paths = [r'/lila/data/deasy/Josiah_data/Prostate/nii_data', r'/gpfs/home1/rbosschaert/']
+datadir = next((path for path in paths if os.path.exists(path)), None)   
 
 valpath_adcpath = os.path.join(datadir,'MR_ProstateX','Images','ADC')
 valpath_t2path = os.path.join(datadir,'MR_ProstateX','Images','T2w')
@@ -596,6 +625,7 @@ with torch.no_grad(): # no grade calculation
     Lesion_Dice=[]
     hd95_list=[]
     False_positives=[]
+    auc_list=[]
     smooth=1
     step=0
     for val_data in val_loader:
@@ -706,6 +736,7 @@ with torch.no_grad(): # no grade calculation
             
             seg = np.array(seg)
             seg=np.squeeze(seg)
+            softmax = np.array(seg)
             #print('seg sum:', np.sum(seg) )
             #print('seg max:', np.max(seg) )
             
@@ -719,6 +750,7 @@ with torch.no_grad(): # no grade calculation
             
             
             seg_filtered[prostate < 1.0]=0.0
+            softmax[prostate < 1.0]=0.0
             
             # #filter out small unconnected segs @0.5x0.5x3 27 vox ~ 2 mL
             structure = np.ones((3, 3, 3), dtype=int)  # this defines the connection filter
@@ -778,21 +810,24 @@ with torch.no_grad(): # no grade calculation
             dice_3D_temp=(2. * intersection + smooth) / (np.sum(seg_flt) + np.sum(gt_flt > 0) + smooth)
             dice_3D.append(dice_3D_temp)
             
-            DSC,FP,hd95, gt_vol, pred_vol=lesion_eval(seg_filtered,gtv,spacing_mm)
+            DSC,FP,hd95, gt_vol, pred_vol, auc=lesion_eval(seg_filtered,gtv,spacing_mm)
             Lesion_Dice.append(DSC)
             hd95_list.append(hd95)
             False_positives.append(FP)
+            auc_list.append(auc)
             print('  Lesion DSC: %f, Lesion HD95: %f mm, Volumetric DSC: %f' %(DSC, hd95, dice_3D_temp))
             print('  Lesion vol: %f mL, prediction vol: %f mL' %(gt_vol,pred_vol))
+            print('  Lesion AUC: %f ' %(auc))
             #print('FP: %i' %FP)
             
             
-            fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) + ',' + str(gt_vol) + ',' + str(pred_vol) +'\n' )
+            fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) + ',' + str(gt_vol) + ',' + str(pred_vol) + ',' + str(auc) + '\n' )
     
             
             seg = np.transpose(seg, (2, 1, 0))
             seg_filtered = np.transpose(seg_filtered, (2, 1, 0))
             prostate = np.transpose(prostate, (2, 1, 0))
+            softmax = np.transpose(softmax, (2, 1, 0))
             
             # img_name=t2w.meta['filename_or_obj'][0].split('/')[-1]
             
@@ -811,16 +846,22 @@ with torch.no_grad(): # no grade calculation
             prostate = sitk.GetImageFromArray(prostate)
             prostate = copy_info(im_obj, prostate)
             sitk.WriteImage(prostate,  os.path.join(seg_path,'prostateseg_%s' % img_name))
+            
+            softmax = sitk.GetImageFromArray(softmax)
+            softmax = copy_info(im_obj, softmax)
+            sitk.WriteImage(softmax,  os.path.join(seg_path,'softmax_%s' % img_name))
         
             #model.save('AVG_best_finetuned')
     dice_3D=np.median(dice_3D)
     median_Lesion_Dice=np.nanmedian(Lesion_Dice)
     median_hd95=np.nanmedian(hd95_list)
+    median_auc=np.nanmedian(auc_list)
     
     print('Median whole volume dice: %f' % dice_3D)
     print('Median Lesion dice: %f' % median_Lesion_Dice)
     #print('mean HD95: %f' % mean_hd95)
     print('median Lesion HD95: %f' % median_hd95)
+    print('median Lesion AUC: %f' % median_auc)
      
     # print(Lesion_Dice)
     # print(FP)
@@ -847,7 +888,7 @@ with torch.no_grad(): # no grade calculation
     wt2_path= os.path.join(root_dir,opt.name,'Result_summary_%s.csv' %opt.model_to_test)
     fd_results_sum = open(wt2_path, 'w')
     fd_results_sum.write('name, median Lesion DSC, median whole volume DSC, median lesion hd95 (mm), precision, recall \n')
-    fd_results_sum.write(opt.name + ',' + str(median_Lesion_Dice) +','+ str(dice_3D) + ',' + str(median_hd95) + ',' + str(precision) + ',' + str(recall) +'\n')
+    fd_results_sum.write(opt.name + ',' + str(median_Lesion_Dice) +','+ str(dice_3D) + ',' + str(median_hd95) + ',' + str(precision) + ',' + str(recall) + ',' + str(median_auc) + '\n')
     fd_results_sum.flush()  
     # if lr>0:
     #         model.update_learning_rate()
