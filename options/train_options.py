@@ -102,7 +102,7 @@ class TrainOptions(BaseOptions):
         #self.parser.add_argument('--T_0', type=int, default=5000, help='learning rate policy: lambda|step|plateau')
         self.parser.add_argument('--modality', type=str, default='ADC', help='modality to use')
         self.parser.add_argument('--seg_threshold', type=float, default=0.5, help='segmentation threshold (prediction>seg_threshold == TRUE')
-        
+        self.parser.add_argument('--test_case', type=str, default='prostateX', help='dataset to test')
         # self.parser.add_argument('--lr_decay_iters', type=int, default=30, help='multiply by a gamma every lr_decay_iters iterations')
         # self.parser.add_argument('--mri_D', type=int, default=1, help='use D to filter MRI')
         # self.parser.add_argument('--use_D_positive', type=int, default=0, help='use D to filter MRI')
