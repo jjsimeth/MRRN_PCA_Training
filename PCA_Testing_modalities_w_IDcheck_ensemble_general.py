@@ -285,8 +285,28 @@ def lesion_eval(seg,gtv,spacing_mm):
     
     labeled_gtv, ncomponents_gtv = label(gtv, structure)
     
+    #get rid of errant reference segmentations
+    labels_gt = np.unique(labeled_gtv)
+    labels_gt = labels_gt[labels_gt != 0]  # skip background
+    
+    kept_labels=[]
+    #biggest_lesion_vol=0.0
+    for label_gt in labels_gt:
+        gt_mask = (labeled_gtv == label_gt)
+        lesion_vol = np.sum(gt_mask) * np.prod(spacing_mm) / 1000.0
+        if lesion_vol<0.05:
+            labeled_gtv[labeled_gtv == label_gt]=0.0
+        else:
+            kept_labels.append(label_gt)
+            
+    ilabel=0
+    for label_gt in kept_labels:
+         ilabel+=1
+         labeled_gtv[labeled_gtv == label_gt]=ilabel
     #labeled_gtv=np.squeeze(gtv) #logic for assumed single lesion
-    #ncomponents_gtv=1
+    ncomponents_gtv=ilabel
+    assert(ilabel>0, 'no lesion in reference')
+        
     labeled_seg, ncomponents_seg = label(seg, structure) 
     
     
