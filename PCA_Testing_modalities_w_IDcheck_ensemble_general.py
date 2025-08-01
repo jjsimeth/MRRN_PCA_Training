@@ -434,7 +434,11 @@ for filename in os.listdir(weights_dir):
         model.netSeg_A.eval()
         models.append(model)
 
-resultsdir= r'/lila/data/deasy/Josiah_data/Prostate/results/NKI_MSK'   
+resultspaths= [r'/lila/data/deasy/Josiah_data/Prostate/results/NKI_MSK' , r'/gpfs/home1/rbosschaert/NKI_MSK']
+resultsdir = next((path for path in resultspaths if os.path.exists(path)), None)  
+
+
+  
 dest_path= os.path.join(root_dir,opt.name) 
 wt_path= os.path.join(root_dir,opt.name,'ct_seg_val_loss.csv')
 if not os.path.exists(dest_path):
@@ -442,7 +446,7 @@ if not os.path.exists(dest_path):
 fd_results = open(wt_path, 'w')
 fd_results.write('train loss, seg accuracy,\n')
 dest_path= os.path.join(root_dir,opt.name) 
-wt_path= os.path.join(resultsdir,'seg_test_DSC_%s_%s_%s.csv' %(opt.model_to_test,opt.name,'P158'))
+wt_path= os.path.join(resultsdir,'seg_test_DSC_%s_%s_%s.csv' %(opt.model_to_test,opt.name,opt.test_case))
 if not os.path.exists(dest_path):
     os.makedirs(dest_path)
 fd_results = open(wt_path, 'w')
@@ -521,8 +525,8 @@ if not os.path.exists(seg_path):
 datapaths = [r'/lila/data/deasy/Josiah_data/Prostate/nii_data', r'/gpfs/home1/rbosschaert/']
 datadir = next((path for path in datapaths if os.path.exists(path)), None)  
 
-resultspaths= [r'/lila/data/deasy/Josiah_data/Prostate/results/NKI_MSK' , r'/gpfs/home1/rbosschaert/NKI_MSK']
-resultsdir = next((path for path in resultspaths if os.path.exists(path)), None)  
+# resultspaths= [r'/lila/data/deasy/Josiah_data/Prostate/results/NKI_MSK' , r'/gpfs/home1/rbosschaert/NKI_MSK']
+# resultsdir = next((path for path in resultspaths if os.path.exists(path)), None)  
 
 
 if opt.test_case.lower()=='prostate158':
@@ -942,7 +946,7 @@ with torch.no_grad(): # no grade calculation
     #print('epoch %i' % epoch, 'DSC  %.2f' % dice_2D, ' (best: %.2f)'  % best_dice)
     fd_results.flush()  
     
-    wt2_path= os.path.join(resultsdir,'Result_summary_%s_%s_%s.csv' %(opt.model_to_test,opt.name,'P158'))
+    wt2_path= os.path.join(resultsdir,'Result_summary_%s_%s_%s.csv' %(opt.model_to_test,opt.name,opt.test_case))
     fd_results_sum = open(wt2_path, 'w')
     fd_results_sum.write('name, median Lesion DSC, median whole volume DSC, median lesion hd95 (mm), precision, recall \n')
     fd_results_sum.write(opt.name + ',' + str(median_Lesion_Dice) +','+ str(dice_3D) + ',' + str(median_hd95) + ',' + str(precision) + ',' + str(recall) +'\n')
