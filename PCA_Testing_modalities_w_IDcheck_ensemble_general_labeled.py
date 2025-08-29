@@ -173,36 +173,48 @@ def process_with_csv(img_name,gt_name,model_name,dataset_name, seg_filtered, gtv
         if csv_info.empty:
             # No match or no CSV
             lesion_row = {
-                "Gleason Grade Group": np.nan,
+                "Gleason_Grade_Group": np.nan,
                 "PIRADS": np.nan,
+                "ISUP": np.nan,
                 "Zone": np.nan,
-                "ROI Volume": np.nan
+                "Clinically_significant": np.nan,
+                "ROI_Volume": np.nan,
+                "Scanner": np.nan,
+                "Voxel_size": np.nan
             }
         else:
-            lesion_data = csv_info[csv_info["New Label"] == ilesion]
+            lesion_data = csv_info[csv_info["Label"] == ilesion]
             if not lesion_data.empty:
                 lesion_row = {
-                    "Gleason Grade Group": lesion_data.get("Gleason Grade Group", pd.Series([np.nan])).values[0],
+                    "Gleason_Grade_Group": lesion_data.get("Gleason_Grade_Group", pd.Series([np.nan])).values[0],
                     "PIRADS": lesion_data.get("PIRADS", pd.Series([np.nan])).values[0],
+                    "ISUP": lesion_data.get("ISUP", pd.Series([np.nan])).values[0],
                     "Zone": lesion_data.get("Zone", pd.Series([np.nan])).values[0],
-                    "ROI Volume": lesion_data.get("ROI Volume", pd.Series([np.nan])).values[0]
+                    "Clinically_significant": lesion_data.get("Clinically_significant", pd.Series([np.nan])).values[0],
+                    "ROI_Volume": lesion_data.get("ROI_Volume", pd.Series([np.nan])).values[0],
+                    "Scanner": lesion_data.get("Scanner", pd.Series([np.nan])).values[0],
+                    "Voxel_size": lesion_data.get("Voxel_size", pd.Series([np.nan])).values[0]
                 }
             else:
                 lesion_row = {
-                    "Gleason Grade Group": np.nan,
+                    "Gleason_Grade_Group": np.nan,
                     "PIRADS": np.nan,
+                    "ISUP": np.nan,
                     "Zone": np.nan,
-                    "ROI Volume": np.nan
+                    "Clinically_significant": np.nan,
+                    "ROI_Volume": np.nan,
+                    "Scanner": np.nan,
+                    "Voxel_size": np.nan
                 }
-
+    
         # Write row: sequential lesion number (i+1), actual label ID (ilesion), metrics, CSV info
         fd_results.write(
             f"{model_name},{dataset_name},{img_name},{gt_name},{ilesion},{DSC[i]},{dice_3D_temp},{hd95[i]},"
             f"{gt_vol[i]},{pred_vol[i]},{gt_adc[i]},{pred_adc[i]},{FP},"
-            f"{lesion_row['Gleason Grade Group']},{lesion_row['PIRADS']},"
-            f"{lesion_row['Zone']},{lesion_row['ROI Volume']}\n"
+            f"{lesion_row['Gleason_Grade_Group']},{lesion_row['PIRADS']},{lesion_row['ISUP']},"
+            f"{lesion_row['Zone']},{lesion_row['Clinically_significant']},"
+            f"{lesion_row['ROI_Volume']},{lesion_row['Scanner']},{lesion_row['Voxel_size']}\n"
         )
-
         #model_name,	dataset_name,	image_name,	gt_name,	ilesion,	GG,	PIRADS,	Zone,	DSC Lesion,	DSC Volume,	HD95,	lesion_vol,	predicted _vol,	lesion_adc,	predicted_adc,	total false positives
 
     return DSC, FP, hd95, gt_vol, pred_vol,gt_adc, pred_adc, labels
@@ -603,10 +615,16 @@ if not os.path.exists(dest_path):
 # fd_results.write('Filename, LesionN, Lesion DSC, whole volume DSC, hd95 (mm), gt vol calculated (mL), pred vol(mL) \n')
 
 fd_results = open(wt_path, 'w')
+# fd_results.write(
+#     'Model,Dataset,Filename,Lesion Filename,LesionN,Lesion DSC,Whole Volume DSC,hd95 (mm),'
+#     'GT Vol Calculated (mL),Pred Vol (mL),GT ADC,Pred ADC,False Positives'
+#     'Gleason Grade Group,PIRADS,Zone,ROI Volume (cc)\n'
+# )
 fd_results.write(
-    'Model,Dataset,Filename,Lesion Filename,LesionN,Lesion DSC,Whole Volume DSC,hd95 (mm),'
-    'GT Vol Calculated (mL),Pred Vol (mL),GT ADC,Pred ADC,False Positives'
-    'Gleason Grade Group,PIRADS,Zone,ROI Volume (cc)\n'
+    "Model,Dataset,Filename,Lesion Filename,LesionN,Lesion DSC,Whole Volume DSC,hd95 (mm),"
+    "GT Vol Calculated (mL),Pred Vol (mL),GT ADC,Pred ADC,False Positives,"
+    "Gleason_Grade_Group,PIRADS,ISUP,Zone,Clinically_significant,"
+    "ROI_Volume,Scanner,Voxel_size\n"
 )
 #fd_results.write(img_name + ',' + str(DSC) +','+ str(dice_3D_temp) + ',' + str(hd95) +'\n' )
       
@@ -654,7 +672,7 @@ elif opt.test_case.lower()=='prostatex':
     custom_names = ["img", "seg", "t2w","prost"]
     
     val_files = find_common_files(valfolders, custom_names,pattern=r'.*ProstateX-(\d+).*\.nii\.gz')   
-    csv_path=os.path.join(datadir,'MR_ProstateX','ADC_csv.csv')
+    csv_path=os.path.join(datadir,'MR_ProstateX','ADC_lesions.csv')
     
 elif opt.test_case.lower()=='msk':  
     valpath_adcpath = os.path.join(datadir,'LINAC95_B_nii','Images','ADC')
