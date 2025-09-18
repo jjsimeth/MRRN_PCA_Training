@@ -168,7 +168,7 @@ def process_with_csv(img_name,gt_name,model_name,dataset_name, seg_filtered, gtv
             df = pd.read_csv(csv_path, encoding="cp1252")  # Fallback for Windows CSV
 
     # Enable connected component analysis only if CSV notprovided
-    connected_component_analysis = csv_path is None
+    connected_component_analysis = (csv_path is None) #or (dataset_name.lower()=='prostate158')
 
     # Run lesion evaluation
     DSC, FP, hd95, gt_vol, pred_vol,gt_adc, pred_adc, labels = lesion_eval(
@@ -198,14 +198,14 @@ def process_with_csv(img_name,gt_name,model_name,dataset_name, seg_filtered, gtv
     # Write per-lesion results
     for i, ilesion in enumerate(labels):  # i = index into metric arrays, ilesion = actual label ID
         izone=np.nan
-        if zones is not None:
-            tz_dice = getDICE(zones==1, gtv)
-            pz_dice = getDICE(zones==2, gtv)
-            if (tz_dice>0) and (tz_dice>pz_dice):
-                izone='TZ'
-            if (pz_dice>0) and (tz_dice<pz_dice):
-                izone='PZ'  
-            print('Determined to be in %s' %izone)
+        # if zones is not None:
+        #     tz_dice = getDICE(zones==1, gtv)
+        #     pz_dice = getDICE(zones==2, gtv)
+        #     if (tz_dice>0) and (tz_dice>pz_dice):
+        #         izone='TZ'
+        #     if (pz_dice>0) and (tz_dice<pz_dice):
+        #         izone='PZ'  
+        #     print('Determined to be in %s' %izone)
                 
         if csv_info.empty:
             # No match or no CSV
@@ -688,8 +688,9 @@ custom_names = ["img", "seg", "t2w","prost"]
 if opt.test_case.lower()=='prostate158':
     valpath_adcpath = os.path.join(datadir,'MR_Prostate158','Images','ADC')
     valpath_t2path = os.path.join(datadir,'MR_Prostate158','Images','T2w')
-    valpath_masks = os.path.join(datadir,'MR_Prostate158','Masks','DIL')
-    valpath_masks2 = os.path.join(datadir,'MR_Prostate158','Masks','DIL2')
+    valpath_masks = os.path.join(datadir,'MR_Prostate158','Lesionwise_Masks','ADC','DIL')
+    #valpath_masks = os.path.join(datadir,'MR_Prostate158','Masks','DIL')
+    # valpath_masks2 = os.path.join(datadir,'MR_Prostate158','Masks','DIL2')
     valpath_prostate_masks = os.path.join(datadir,'MR_Prostate158','Masks','Prostate')
     # valpath_prostate_masks = os.path.join(datadir,'MR_Prostate158_Train','Masks','TZ')
     # valpath_prostate_masks = os.path.join(datadir,'MR_Prostate158_Train','Masks','PZ')
@@ -699,15 +700,14 @@ if opt.test_case.lower()=='prostate158':
     valfolders = [valpath_adcpath, valpath_masks,valpath_t2path,valpath_prostate_masks]  # Replace with actual paths
     custom_names = ["img", "seg", "t2w","prost"]
     
-    val_files1 = find_common_files(valfolders, custom_names,pattern=r'.*_P(\d+)_.*\.nii\.gz$')
+    val_files = find_common_files(valfolders, custom_names,pattern = r'.*_P(\d+)_.*\.nii(?:\.gz)?$')
+    # valfolders = [valpath_adcpath, valpath_masks2,valpath_t2path,valpath_prostate_masks]  # Replace with actual paths
+    # custom_names = ["img", "seg", "t2w","prost"]
     
-    valfolders = [valpath_adcpath, valpath_masks2,valpath_t2path,valpath_prostate_masks]  # Replace with actual paths
-    custom_names = ["img", "seg", "t2w","prost"]
+    # val_files2 = find_common_files(valfolders, custom_names,pattern=r'.*_P(\d+)_.*\.nii\.gz$')
     
-    val_files2 = find_common_files(valfolders, custom_names,pattern=r'.*_P(\d+)_.*\.nii\.gz$')
-    
-    val_files,Allgroups=combine_lists_with_sources(val_files1,val_files2)
-    csv_path=os.path.join(datadir,'MR_Prostate158','ADC_lesions.csv')
+    # val_files,Allgroups=combine_lists_with_sources(val_files1,val_files2)
+    #csv_path=os.path.join(datadir,'MR_Prostate158','ADC_lesions_R1.csv')
 # if opt.test_case.lower()=='prostate158_test':
 #     valpath_adcpath = os.path.join(datadir,'MR_Prostate158','Images','ADC')
 #     valpath_t2path = os.path.join(datadir,'MR_Prostate158','Images','T2w')
