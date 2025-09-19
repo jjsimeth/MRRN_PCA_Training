@@ -707,7 +707,7 @@ if opt.test_case.lower()=='prostate158':
     # val_files2 = find_common_files(valfolders, custom_names,pattern=r'.*_P(\d+)_.*\.nii\.gz$')
     
     # val_files,Allgroups=combine_lists_with_sources(val_files1,val_files2)
-    #csv_path=os.path.join(datadir,'MR_Prostate158','ADC_lesions_R1.csv')
+    csv_path=os.path.join(datadir,'MR_Prostate158','ADC_lesions_R1.csv')
 # if opt.test_case.lower()=='prostate158_test':
 #     valpath_adcpath = os.path.join(datadir,'MR_Prostate158','Images','ADC')
 #     valpath_t2path = os.path.join(datadir,'MR_Prostate158','Images','T2w')
